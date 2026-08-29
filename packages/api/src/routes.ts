@@ -117,6 +117,24 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     return { entry }
   })
 
+  app.post('/api/knowledge/entries/:id/summary', async (req, reply) => {
+    const id = (req.params as { id: string }).id
+    const entry = await ctx.knowledge.generateSummary(id)
+    if (!entry) return reply.code(404).send({ error: 'entry not found' })
+    return { entry }
+  })
+
+  app.post('/api/knowledge/entries/:id/rate', async (req, reply) => {
+    const id = (req.params as { id: string }).id
+    const body = req.body as { rating?: number }
+    if (typeof body?.rating !== 'number') {
+      return reply.code(400).send({ error: 'rating is required' })
+    }
+    const entry = await ctx.knowledge.rate(id, body.rating)
+    if (!entry) return reply.code(404).send({ error: 'entry not found' })
+    return { entry }
+  })
+
   // ---- 回收站 ----
   app.get('/api/knowledge/trash', async () => ({
     entries: await ctx.knowledge.listTrash(),
