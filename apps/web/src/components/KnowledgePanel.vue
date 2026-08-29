@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch, inject, type Ref } from '
 import { api, type KnowledgeEntry, type EventItem, type CategoryNode } from '../lib/api'
 import { renderMarkdown, type TocItem } from '../lib/markdown'
 import CategoryTree from './CategoryTree.vue'
+import DocTreeItem from './DocTreeItem.vue'
 
 const lastEvent = inject<Ref<EventItem | null>>('lastEvent', ref(null))
 
@@ -12,6 +13,9 @@ const searchQ = ref('')
 const searchResults = ref<Array<{ entry: KnowledgeEntry; score: number }>>([])
 const activeCategory = ref('')
 const selectedId = ref(localStorage.getItem('ikit-kb-selected') ?? '')
+const activeHeading = ref('')
+const tocCollapsed = ref(false)
+const kbContentEl = ref<HTMLElement | null>(null)
 const loading = ref(false)
 const sortOption = ref<'updated' | 'title' | 'created'>('updated')
 const statusFilter = ref<'all' | 'draft' | 'published' | 'archived'>('all')
@@ -33,6 +37,165 @@ const importing = ref(false)
 // 添加分类
 const showAddCategory = ref(false)
 const newCategory = ref('')
+
+// 子文档创建父 id（点击「＋」建子文档时设置，用于新建后刷新树展开）
+const createChildParent = ref('')
+
+// 新建顶层文档
+function createRootDoc() {
+  createChildParent.value = ''
+  showRight.value = false
+  openCreate('')
+}
+
+// 新建子文档（parentId 指向父文档）
+function createChildDoc(parentId: string) {
+  createChildParent.value = parentId
+  showRight.value = false
+  openCreate()
+  // 展开父节点方便看到新子文档
+  expandedDocs.value = { ...expandedDocs.value, [parentId]: true }
+}
+
+// 移动文档到目标父（parentId 为空 = 顶层）
+async function moveDoc(id: string, parentId: string | '') {
+  await api(`/api/knowledge/entries/${id}/move`, {
+    method: 'POST',
+    body: JSON.stringify({ parentId: parentId || null }),
+  })
+  menuFor.value = ''
+  await load()
+}
+
+// ---- 树形移动选择器 ----
+const movePickerFor = ref('') // 正在选择移动目标的文档 id
+const moveTargetParent = ref<string | ''>('') // 选择的目标父（'' = 根目录）
+const moveTreeExpanded = ref<Record<string, boolean>>({})
+
+// 打开移动面板
+function openMovePicker(id: string) {
+  menuFor.value = ''
+  const entry = entries.value.find((e) => e.id === id)
+  moveTargetParent.value = entry?.parentId ?? ''
+  movePickerFor.value = id
+  moveTreeExpanded.value = {}
+}
+
+function toggleMoveTree(id: string) {
+  moveTreeExpanded.value = { ...moveTreeExpanded.value, [id]: !moveTreeExpanded.value[id] }
+}
+
+// 确认移动
+async function confirmMove() {
+  const id = movePickerFor.value
+  movePickerFor.value = ''
+  if (!id) return
+  // 防循环：不能移到自己或子孙下
+  if (isForbiddenTarget(moveTargetParent.value, id)) {
+    error.value = '不能移动到自身或其子文档下'
+    return
+  }
+  await api(`/api/knowledge/entries/${id}/move`, {
+    method: 'POST',
+    body: JSON.stringify({ parentId: moveTargetParent.value || null }),
+  })
+  await load()
+}
+
+function closeMovePicker() {
+  movePickerFor.value = ''
+}
+
+// 不允许移到自己或自己的子孙（防循环）
+function isForbiddenTarget(targetId: string | '', id: string): boolean {
+  if (targetId === id) return true
+  // 判断 target 是否在 id 的子树内
+  const idSet = new Set<string>([id])
+  const walk = (nodeId: string) => {
+    const children = entries.value.filter((e) => e.parentId === nodeId && !e.deletedAt)
+    for (const c of children) {
+      idSet.add(c.id)
+      walk(c.id)
+    }
+  }
+  walk(id)
+  return !!targetId && idSet.has(targetId)
+}
+
+// ---- 拖拽排序 / 移动 ----
+const dragId = ref('')
+const overId = ref('')
+const overPos = ref<'top' | 'middle' | 'bottom'>('middle')
+const dragParent = ref<string | ''>('')
+
+function onDragStart(id: string) {
+  dragId.value = id
+  const entry = entries.value.find((e) => e.id === id)
+  dragParent.value = entry?.parentId ?? ''
+}
+
+function onDragOver(id: string, pos: 'top' | 'middle' | 'bottom') {
+  if (id !== dragId.value) {
+    overId.value = id
+    overPos.value = pos
+  }
+}
+
+async function onDropTo(targetId: string, pos: 'top' | 'middle' | 'bottom') {
+  const dragged = dragId.value
+  dragId.value = ''
+  overId.value = ''
+  overPos.value = 'middle'
+  const over = targetId
+  if (!dragged || !over || dragged === over) return
+  // 若目标是被拖节点的子孙 → 忽略（防循环）
+  if (isForbiddenTarget(over, dragged)) return
+
+  // 行中部 = 移动为该文档的子文档（跨级，即使原同父级也可）
+  if (pos === 'middle') {
+    await api(`/api/knowledge/entries/${dragged}/move`, {
+      method: 'POST',
+      body: JSON.stringify({ parentId: over }),
+    })
+    expandedDocs.value = { ...expandedDocs.value, [over]: true }
+    await load()
+    return
+  }
+
+  // 上/下边缘 = 同级插入。为保证落入同级，先确保被拖与目标同父；
+  // 若不同父，则把被拖移到目标父级下，再做同级排序。
+  let pid = (entries.value.find((e) => e.id === over)?.parentId ?? '') as string | ''
+  const draggedEntry = entries.value.find((e) => e.id === dragged)
+  if ((draggedEntry?.parentId || undefined) !== (pid || undefined)) {
+    await api(`/api/knowledge/entries/${dragged}/move`, {
+      method: 'POST',
+      body: JSON.stringify({ parentId: pid || null }),
+    })
+  }
+  const siblings = entries.value
+    .filter((e) => !e.deletedAt && (e.parentId || undefined) === (pid || undefined))
+    .sort((a, b) => {
+      const ao = a.sortOrder ?? Number.MAX_SAFE_INTEGER
+      const bo = b.sortOrder ?? Number.MAX_SAFE_INTEGER
+      return ao - bo
+    })
+    .map((e) => e.id)
+  const fromIdx = siblings.indexOf(dragged)
+  const toIdx = siblings.indexOf(over)
+  if (fromIdx < 0 || toIdx < 0) {
+    await load()
+    return
+  }
+  siblings.splice(fromIdx, 1)
+  // 插入位置：top = 在 over 之前；bottom = 在 over 之后
+  const insertAt = siblings.indexOf(over)
+  siblings.splice(pos === 'top' ? insertAt : insertAt + 1, 0, dragged)
+  await api('/api/knowledge/reorder', {
+    method: 'POST',
+    body: JSON.stringify({ parentId: pid || null, ids: siblings }),
+  })
+  await load()
+}
 
 // 响应式抽屉（移动端/平板）
 const showSidebar = ref(false)
@@ -120,6 +283,16 @@ const totalWords = computed(() =>
   entries.value.reduce((sum, e) => sum + (e.content?.length ?? 0), 0),
 )
 
+// 标签云字号：按出现次数映射到 12~24px（min=1 次 → 12px，max → 24px）
+function tagCloudSize(count: number): number {
+  const maxCount = Math.max(1, ...tags.value.map((t) => t.count))
+  const min = 12
+  const max = 24
+  if (maxCount === 1) return (min + max) / 2
+  const ratio = (count - 1) / (maxCount - 1)
+  return Math.round(min + ratio * (max - min))
+}
+
 const categoryPaths = computed(() => {
   const paths: string[] = []
   const walk = (nodes: CategoryNode[]) => {
@@ -161,6 +334,43 @@ const display = computed(() => {
 })
 
 const selected = computed(() => display.value.find((e) => e.id === selectedId.value) ?? null)
+
+// 文档树（基于 parentId 的递归树）
+const expandedDocs = ref<Record<string, boolean>>({})
+
+type DocNode = { entry: KnowledgeEntry; children: DocNode[] }
+
+const docTree = computed<DocNode[]>(() => {
+  const map = new Map<string, DocNode>()
+  const roots: DocNode[] = []
+  for (const e of display.value) {
+    map.set(e.id, { entry: e, children: [] })
+  }
+  for (const e of display.value) {
+    const node = map.get(e.id)!
+    if (e.parentId && map.has(e.parentId)) {
+      map.get(e.parentId)!.children.push(node)
+    } else {
+      roots.push(node)
+    }
+  }
+  const sortNodes = (nodes: DocNode[]) => {
+    nodes.sort((a, b) => {
+      if (!!a.entry.pinned !== !!b.entry.pinned) return a.entry.pinned ? -1 : 1
+      const ao = a.entry.sortOrder ?? Number.MAX_SAFE_INTEGER
+      const bo = b.entry.sortOrder ?? Number.MAX_SAFE_INTEGER
+      if (ao !== bo) return ao - bo
+      return b.entry.updatedAt.localeCompare(a.entry.updatedAt)
+    })
+    nodes.forEach((n) => sortNodes(n.children))
+  }
+  sortNodes(roots)
+  return roots
+})
+
+function toggleDocExpand(id: string) {
+  expandedDocs.value = { ...expandedDocs.value, [id]: !expandedDocs.value[id] }
+}
 
 const rendered = computed(() =>
   selected.value && !editing.value
@@ -206,10 +416,12 @@ function selectCategory(path: string) {
   showSidebar.value = false
 }
 
-function openCreate() {
+function openCreate(category?: string) {
   editing.value = true
+  showRight.value = false
   selectedId.value = ''
-  form.value = loadDraft() ?? { title: '', content: '', tags: '', category: activeCategory.value }
+  form.value =
+    loadDraft() ?? { title: '', content: '', tags: '', category: category ?? activeCategory.value }
 }
 
 function openEdit() {
@@ -278,11 +490,12 @@ async function save() {
     } else {
       const r = await api<{ entry: KnowledgeEntry }>('/api/knowledge/entries', {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, parentId: createChildParent.value || undefined }),
       })
       selectedId.value = r.entry.id
     }
     editing.value = false
+    createChildParent.value = ''
     clearDraft()
     await load()
     await loadCategories()
@@ -312,6 +525,28 @@ const STATUS_LABEL: Record<string, string> = {
   draft: '草稿',
   published: '已发布',
   archived: '已归档',
+}
+
+// 阅读时长（按中文/英文混排字数估算，约 250 字/分钟）
+const readMinutes = computed(() => {
+  const c = selected.value?.content ?? ''
+  return Math.max(1, Math.ceil(c.length / 250))
+})
+
+// 相对时间（x分钟前 / x小时前 / 昨天 / x天前 / 日期）
+function relativeTime(iso: string): string {
+  const d = new Date(iso).getTime()
+  if (!d) return ''
+  const diff = Date.now() - d
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return '刚刚'
+  if (min < 60) return `${min}分钟前`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}小时前`
+  const day = Math.floor(hr / 24)
+  if (day === 1) return '昨天'
+  if (day < 30) return `${day}天前`
+  return new Date(iso).toLocaleDateString()
 }
 
 // 面包屑（分类路径拆分）
@@ -444,6 +679,13 @@ function showTrash() {
   loadTrash()
 }
 
+function showArchive() {
+  view.value = 'list'
+  activeCategory.value = ''
+  statusFilter.value = 'archived'
+  searchQ.value = ''
+}
+
 function showList() {
   view.value = 'list'
 }
@@ -519,10 +761,12 @@ async function renameCategory(path: string) {
 const batchMode = ref(false)
 const selectedIds = ref(new Set<string>())
 const batchCategory = ref('')
+const menuFor = ref('') // 当前打开的「⋯」菜单所属文档 id
 
 function toggleBatchMode() {
   batchMode.value = !batchMode.value
   selectedIds.value = new Set()
+  menuFor.value = ''
 }
 
 function toggleSelect(id: string) {
@@ -531,6 +775,23 @@ function toggleSelect(id: string) {
   else next.add(id)
   selectedIds.value = next
 }
+
+function toggleSelectAll() {
+  // 全选/全不选当前 display
+  const ids = display.value.map((e) => e.id)
+  const allSelected = ids.length > 0 && ids.every((id) => selectedIds.value.has(id))
+  const next = new Set(selectedIds.value)
+  if (allSelected) {
+    ids.forEach((id) => next.delete(id))
+  } else {
+    ids.forEach((id) => next.add(id))
+  }
+  selectedIds.value = next
+}
+
+const allDisplaySelected = computed(
+  () => display.value.length > 0 && display.value.every((e) => selectedIds.value.has(e.id)),
+)
 
 async function applyBatch() {
   const ids = [...selectedIds.value]
@@ -548,6 +809,84 @@ async function applyBatch() {
   } catch (e: any) {
     error.value = e.message
   }
+}
+
+// 批量删除（软删除到回收站）
+async function batchDelete() {
+  const ids = [...selectedIds.value]
+  if (!ids.length) return
+  if (!confirm(`确认删除选中的 ${ids.length} 篇？`)) return
+  try {
+    for (const id of ids) {
+      await api(`/api/knowledge/entries/${id}`, { method: 'DELETE' })
+    }
+    notice.value = `已删除 ${ids.length} 篇`
+    selectedIds.value = new Set()
+    batchMode.value = false
+    menuFor.value = ''
+    await load()
+    await loadCategories()
+  } catch (e: any) {
+    error.value = e.message
+  }
+}
+
+// 批量置顶
+async function batchPin() {
+  const ids = [...selectedIds.value]
+  if (!ids.length) return
+  for (const id of ids) {
+    await api(`/api/knowledge/entries/${id}/toggle-pin`, { method: 'POST' })
+  }
+  notice.value = `已切换 ${ids.length} 篇置顶`
+  selectedIds.value = new Set()
+  batchMode.value = false
+  await load()
+}
+
+// 对任意文档 id 执行单项操作（先选中，再复用单项函数）
+async function actOnEntry(id: string, fn: () => Promise<void> | void) {
+  selectedId.value = id
+  menuFor.value = ''
+  await fn()
+}
+
+// 删除指定 id 的文档（用于 ⋯ 菜单）
+async function removeEntryById(id: string) {
+  const entry = entries.value.find((e) => e.id === id)
+  if (!entry) return
+  if (!confirm(`确认删除「${entry.title}」？`)) return
+  await api(`/api/knowledge/entries/${id}`, { method: 'DELETE' })
+  if (selectedId.value === id) selectedId.value = ''
+  menuFor.value = ''
+  await load()
+  await loadCategories()
+}
+
+// 复制链接
+async function copyLink(id: string) {
+  const e = entries.value.find((x) => x.id === id)
+  if (!e) return
+  const link = `${location.origin}/api/share/${e.shareToken ?? ''}`
+  try {
+    await navigator.clipboard.writeText(link)
+    notice.value = '链接已复制'
+  } catch {
+    prompt('复制链接：', link)
+  }
+}
+
+// 新标签页打开（仅返回正文视图，无独立路由，用分享页）
+function openInNewTab(id: string) {
+  const e = entries.value.find((x) => x.id === id)
+  const url = e?.shareToken
+    ? `${location.origin}/api/share/${e.shareToken}`
+    : `${location.origin}/?doc=${id}`
+  window.open(url, '_blank')
+}
+
+function closeMenu() {
+  menuFor.value = ''
 }
 
 // ---- 导入 ----
@@ -617,6 +956,30 @@ function scrollToHeading(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
+// 目录当前高亮：随中栏滚动更新
+function updateActiveHeading() {
+  const items = rendered.value.toc
+  if (!items.length) return
+  const el = kbContentEl.value
+  const top = el ? el.getBoundingClientRect().top : 0
+  let current = items[0].id
+  for (const h of items) {
+    const node = document.getElementById(h.id)
+    if (node && node.getBoundingClientRect().top - top <= 60) current = h.id
+  }
+  activeHeading.value = current
+}
+
+watch(
+  () => [selectedId.value, rendered.value.toc.length],
+  () => {
+    activeHeading.value = ''
+    if (selected.value && rendered.value.toc.length) {
+      requestAnimationFrame(() => setTimeout(updateActiveHeading, 60))
+    }
+  },
+)
+
 watch(lastEvent, (ev) => {
   if (ev?.type === 'knowledge:changed') {
     load()
@@ -628,11 +991,18 @@ onMounted(() => {
   load()
   loadCategories()
   window.addEventListener('keydown', onKeydown)
+  window.addEventListener('click', onOutsideClick)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('click', onOutsideClick)
 })
+
+function onOutsideClick(e: MouseEvent) {
+  const t = e.target as HTMLElement
+  if (!t.closest('.doc-menu') && !t.closest('.ia-btn')) menuFor.value = ''
+}
 
 function onKeydown(e: KeyboardEvent) {
   const target = e.target as HTMLElement
@@ -663,62 +1033,27 @@ function onKeydown(e: KeyboardEvent) {
     <header class="kb-toolbar">
       <button class="tb-btn" title="分类" @click="showSidebar = true">☰</button>
       <span class="tb-title">{{ selected?.title ?? '知识库' }}</span>
-      <button class="tb-btn" title="文章列表" @click="showRight = true">📄</button>
+      <button class="tb-btn" title="分类 / 标签" @click="showRight = true">☷</button>
     </header>
 
-    <!-- 左栏：详情视图显示大纲 TOC，列表视图显示目录树 -->
+    <!-- 左栏：搜索 + 操作 + 文档列表 + 统计 + 回收站 -->
     <aside class="kb-side" :class="{ open: showSidebar }">
-      <!-- 详情视图：大纲 TOC -->
-      <template v-if="selected && !editing">
-        <button class="btn secondary sm" style="align-self: flex-start" @click="selectedId = ''">
-          ← 返回列表
-        </button>
-        <div class="side-title">目录大纲</div>
-        <div v-if="rendered.toc.length" class="toc-list">
-          <div
-            v-for="h in rendered.toc"
-            :key="h.id"
-            class="toc-item"
-            :style="{ paddingLeft: 8 + (h.level - 1) * 14 + 'px' }"
-            @click="scrollToHeading(h.id)"
-          >
-            {{ h.text }}
-          </div>
-        </div>
-        <div v-else class="muted" style="font-size: 12px; padding: 4px 8px">无标题大纲</div>
-      </template>
-
-      <!-- 列表视图：目录树 + 操作 -->
-      <template v-else>
-      <input
-        ref="searchInput"
-        v-model="searchQ"
-        class="kb-search"
-        placeholder="搜索标题 / 内容...（按 / 聚焦）"
-        @input="onSearchInput"
-      />
-      <div class="side-actions">
-        <button class="btn sm" @click="openCreate">＋ 新建</button>
-        <button class="btn secondary sm" @click="showAddCategory = !showAddCategory">＋ 分类</button>
-      </div>
-
-      <div v-if="showAddCategory" class="add-cat">
+      <div class="kb-header">
+        <div class="kb-logo">📚 <span>个人</span></div>
         <input
-          v-model="newCategory"
-          placeholder="分类路径，如 技术/前端"
-          @keydown.enter="addCategory"
+          ref="searchInput"
+          v-model="searchQ"
+          class="kb-search"
+          placeholder="🔍 搜索..."
+          @input="onSearchInput"
         />
-        <div class="row" style="gap: 6px">
-          <button class="btn sm" @click="addCategory">添加</button>
-          <button class="btn secondary sm" @click="showAddCategory = false">取消</button>
-        </div>
       </div>
 
-      <div class="side-actions">
-        <button class="btn secondary sm" :disabled="importing" @click="triggerFile">
+      <div class="side-actions side-actions-row">
+        <button class="btn secondary sm action-btn" :disabled="importing" @click="triggerFile">
           导入文件
         </button>
-        <button class="btn secondary sm" :disabled="importing" @click="triggerDir">
+        <button class="btn secondary sm action-btn" :disabled="importing" @click="triggerDir">
           导入文件夹
         </button>
       </div>
@@ -745,52 +1080,146 @@ function onKeydown(e: KeyboardEvent) {
         <option value="90d">最近 90 天</option>
       </select>
 
-      <div class="cat-section">
-        <div
-          class="cat-all"
-          :class="{ active: !activeCategory }"
-          @click="activeCategory = ''"
-        >
-          全部 <span class="muted">{{ entries.length }}</span>
+      <div class="doc-list">
+        <div class="right-title">
+          <span class="tree-title">目录</span>
+          <div class="tree-title-actions">
+            <button class="tree-action" title="新建文档" @click="createRootDoc">＋</button>
+            <button class="tree-action" title="批量操作" @click="toggleBatchMode">☰</button>
+          </div>
         </div>
-        <CategoryTree
-          v-if="categories.length"
-          :nodes="categories"
-          :active-path="activeCategory"
-          @select="selectCategory"
-          @remove="removeCategory"
-          @rename="renameCategory"
-        />
-        <div v-else class="muted" style="font-size: 12px; padding: 4px 8px">暂无分类</div>
+
+        <!-- 批量选择模式头部 -->
+        <div v-if="batchMode" class="batch-select-bar">
+          <div class="batch-select-head">
+            <label class="batch-all">
+              <input type="checkbox" :checked="allDisplaySelected" @change="toggleSelectAll" />
+              <span>已选 {{ selectedIds.size }} 项</span>
+            </label>
+            <button class="btn-new batch-exit" @click="batchMode = false; selectedIds = new Set()">
+              退出
+            </button>
+          </div>
+          <div class="batch-bar">
+            <input
+              v-model="batchCategory"
+              list="category-options"
+              placeholder="目标分类（留空 = 取消归类）"
+            />
+            <button class="btn sm" :disabled="!selectedIds.size" @click="applyBatch">
+              应用({{ selectedIds.size }})
+            </button>
+            <button class="btn danger sm" :disabled="!selectedIds.size" @click="batchDelete">删除</button>
+            <button class="btn secondary sm" :disabled="!selectedIds.size" @click="batchPin">置顶</button>
+          </div>
+        </div>
+        <div v-if="display.length">
+          <DocTreeItem
+            v-for="node in docTree"
+            :key="node.entry.id"
+            :node="node"
+            :depth="0"
+            :selected-id="selectedId"
+            :batch-mode="batchMode"
+            :search-q="searchQ"
+            :expanded-docs="expandedDocs"
+            :menu-for="menuFor"
+            :highlight="highlight"
+            :drag-id="dragId"
+            :over-id="overId"
+            :over-pos="overPos"
+            @select="select"
+            @toggle="toggleDocExpand"
+            @toggle-select="toggleSelect"
+            @menu="(id) => (menuFor = menuFor === id ? '' : id)"
+            @add-child="createChildDoc"
+            @drag-start="onDragStart"
+            @drag-over="onDragOver"
+            @drop="onDropTo"
+            @drag-end="() => (dragId = '', overId = '')"
+            @pick-move-target="openMovePicker"
+          >
+            <template #entry-menu="{ id }">
+              <div class="doc-menu-item" @click="openInNewTab(id)">↗ 在新标签页打开</div>
+              <div class="doc-menu-item" @click="actOnEntry(id, shareEntry)">🔗 分享</div>
+              <div class="doc-menu-item" @click="copyLink(id)">📋 复制链接</div>
+              <div class="doc-menu-item" @click="actOnEntry(id, exportEntry)">⬇ 导出</div>
+              <div class="doc-menu-item" @click="actOnEntry(id, openEdit)">✏️ 编辑</div>
+              <div class="doc-menu-item" @click="actOnEntry(id, togglePin)">
+                📌 {{ entries.find((e) => e.id === id)?.pinned ? '取消置顶' : '置顶' }}
+              </div>
+              <div class="doc-menu-item" @click="removeEntryById(id)">🗑 删除</div>
+            </template>
+          </DocTreeItem>
+        </div>
+        <div v-else class="empty">暂无文档</div>
       </div>
 
-      <div class="stats-box">
-        <div class="stat-item"><span>{{ entries.length }}</span> 文档</div>
-        <div class="stat-item"><span>{{ tags.length }}</span> 标签</div>
-        <div class="stat-item"><span>{{ totalWords }}</span> 字</div>
-      </div>
-
-      <div class="trash-entry" :class="{ active: view === 'trash' }" @click="showTrash">
-        🗑 回收站
-      </div>
-
-      <div v-if="recentEntries.length" class="recent-section">
-        <div class="right-title" style="padding: 8px 8px 4px">最近访问</div>
-        <div
-          v-for="e in recentEntries"
-          :key="e.id"
-          class="recent-item"
-          :class="{ active: e.id === selectedId }"
-          @click="select(e.id)"
-        >
-          {{ e.title }}
+      <!-- 树形移动选择器 -->
+      <div v-if="movePickerFor" class="move-picker-overlay" @click.self="closeMovePicker">
+        <div class="move-picker" @click.stop>
+          <div class="move-picker-head">
+            <span>移动到…</span>
+            <button class="move-picker-close" @click="closeMovePicker">×</button>
+          </div>
+          <div class="move-picker-body">
+            <div
+              class="move-picker-root"
+              :class="{ active: moveTargetParent === '' }"
+              @click="moveTargetParent = ''"
+            >
+              📂 根目录
+            </div>
+            <DocTreeItem
+              v-for="node in docTree"
+              :key="'mp-' + node.entry.id"
+              :node="node"
+              :depth="0"
+              selected-id=""
+              :batch-mode="false"
+              search-q=""
+              :expanded-docs="moveTreeExpanded"
+              menu-for=""
+              :highlight="highlight"
+              :move-picker-for="movePickerFor"
+              :move-target-parent="moveTargetParent"
+              :forbidden="isForbiddenTarget(node.entry.id, movePickerFor)"
+              :move-pick-mode="true"
+              @pick-move-target="moveTargetParent = node.entry.id"
+              @toggle="toggleMoveTree"
+            />
+          </div>
+          <div class="move-picker-foot">
+            <button class="btn secondary sm" @click="closeMovePicker">取消</button>
+            <button class="btn sm" @click="confirmMove">移动到</button>
+          </div>
         </div>
       </div>
-      </template>
     </aside>
 
     <!-- 中栏：文章内容（Markdown 渲染） -->
     <section class="kb-content">
+      <!-- 目录浮窗（飞书样式）：固定于内容左侧，不随正文滚动 -->
+      <aside
+        v-if="selected && !editing && rendered.toc.length && !tocCollapsed"
+        class="toc-float"
+      >
+        <button class="toc-float-collapse" title="收起目录" @click="tocCollapsed = true">«</button>
+        <div class="toc-float-list">
+          <div
+            v-for="h in rendered.toc"
+            :key="h.id"
+            class="toc-float-item"
+            :class="{ active: activeHeading === h.id }"
+            :style="{ paddingLeft: 10 + (h.level - 1) * 14 + 'px' }"
+            @click="scrollToHeading(h.id)"
+          >
+            {{ h.text }}
+          </div>
+        </div>
+      </aside>
+
+      <div ref="kbContentEl" class="content-scroll" @scroll.passive="updateActiveHeading">
       <div class="content-wrap" @click="onContentClick">
         <div v-if="view === 'trash'" class="trash-view">
           <div class="row" style="justify-content: space-between; margin-bottom: 16px">
@@ -817,29 +1246,13 @@ function onKeydown(e: KeyboardEvent) {
           <div v-else class="empty">回收站为空</div>
         </div>
 
-        <div v-else-if="!editing && !selected" class="list-view">
-          <div class="list-header">
-            <h3 style="margin: 0">{{ searchQ.trim() ? '搜索结果' : '知识库' }}</h3>
-            <span class="muted">{{ display.length }} 篇</span>
+        <div v-else-if="!editing && !selected" class="empty-state">
+          <div class="empty-state-icon">📖</div>
+          <div class="empty-state-title">{{ searchQ.trim() ? '未找到匹配文档' : '选择或新建一篇文章' }}</div>
+          <div class="empty-state-sub muted">
+            {{ searchQ.trim() ? `在左侧列表查看“${searchQ}”的结果` : '从左侧文档列表选择一篇文章查看内容' }}
           </div>
-          <div v-if="display.length" class="card-list">
-            <div v-for="e in display" :key="e.id" class="card-item" @click="select(e.id)">
-              <div class="card-title">
-                <span v-if="e.pinned" class="pin-icon">📌</span>
-                <span v-html="highlight(e.title, searchQ)"></span>
-              </div>
-              <div v-if="e.category || e.tags.length" class="card-tags">
-                <span v-if="e.category" class="badge">📁 {{ e.category }}</span>
-                <span v-for="t in e.tags" :key="t" class="badge">{{ t }}</span>
-              </div>
-              <div class="card-summary muted">{{ e.summary || e.content.slice(0, 120) }}</div>
-              <div class="card-meta muted">
-                <span class="status-dot" :class="e.status ?? 'published'"></span>
-                {{ STATUS_LABEL[e.status ?? 'published'] }} · {{ new Date(e.updatedAt).toLocaleDateString() }}
-              </div>
-            </div>
-          </div>
-          <div v-else class="empty">暂无文章，点击「＋ 新建」或「导入」开始</div>
+          <button v-if="!searchQ.trim()" class="btn" @click="openCreate">＋ 新建</button>
         </div>
 
         <div v-else-if="editing" class="editor">
@@ -892,6 +1305,15 @@ function onKeydown(e: KeyboardEvent) {
               {{ selected.title }}
               <span v-if="selected.pinned" class="pin-icon">📌</span>
             </h1>
+
+            <!-- meta 行：分类标签 · 时间 · 阅读时长 -->
+            <div class="doc-meta">
+              <span v-if="selected.category || selected.tags.length" class="meta-tags">
+                🏷️ {{ [selected.category, ...selected.tags].filter(Boolean).join(' · ') }}
+              </span>
+              <span>🕒 {{ relativeTime(selected.updatedAt) }}</span>
+              <span>📄 {{ readMinutes }} 分钟阅读</span>
+            </div>
 
             <!-- 状态徽标 + 切换 -->
             <div class="status-row">
@@ -987,89 +1409,97 @@ function onKeydown(e: KeyboardEvent) {
           </div>
         </template>
       </div>
+      </div>
+
+      <!-- 目录收起后的展开钮 -->
+      <button
+        v-if="selected && !editing && rendered.toc.length && tocCollapsed"
+        class="toc-float-expand"
+        title="展开目录"
+        @click="tocCollapsed = false"
+      >
+        »
+      </button>
     </section>
 
-    <!-- 右栏：详情视图显示文章列表，列表视图显示热词标签 -->
+    <!-- 右栏：分类导航 + 热门标签 -->
     <aside class="kb-right" :class="{ open: showRight }">
-      <!-- 详情视图：文章列表 -->
-      <template v-if="selected">
       <div class="kb-right-list">
-        <div class="right-title" style="display: flex; justify-content: space-between; align-items: center; gap: 8px">
-          文章列表
-          <div class="row" style="gap: 6px">
-            <select v-model="sortOption" class="sort-select">
-              <option value="updated">更新时间</option>
-              <option value="title">标题</option>
-              <option value="created">创建时间</option>
-            </select>
-            <button class="btn secondary sm" @click="toggleBatchMode">
-              {{ batchMode ? '取消' : '批量归类' }}
-            </button>
-          </div>
-        </div>
-
-        <div v-if="batchMode" class="batch-bar">
-          <input
-            v-model="batchCategory"
-            list="category-options"
-            placeholder="目标分类（留空 = 取消归类）"
-          />
-          <button class="btn sm" :disabled="!selectedIds.size" @click="applyBatch">
-            应用({{ selectedIds.size }})
-          </button>
-        </div>
-
-        <div v-if="display.length">
-          <div
-            v-for="e in display"
-            :key="e.id"
-            class="kb-item"
-            :class="{ active: !batchMode && e.id === selectedId }"
-            @click="batchMode ? toggleSelect(e.id) : select(e.id)"
+        <div class="right-title">🏷️ 全部标签</div>
+        <div class="tag-cloud">
+          <span
+            class="cloud-tag"
+            :class="{ active: !searchQ.trim() && !activeCategory }"
+            :style="{ fontSize: tagCloudSize(entries.length) + 'px' }"
+            @click="searchQ = ''; activeCategory = ''; doSearch()"
           >
-            <div class="kb-item-row">
-              <div v-if="batchMode" class="kb-check" :class="{ on: selectedIds.has(e.id) }">
-                {{ selectedIds.has(e.id) ? '✓' : '' }}
-              </div>
-              <div style="flex: 1; min-width: 0">
-                <div class="kb-item-title">
-                  <span v-if="e.pinned" class="pin-icon">📌</span>
-                  <span
-                    class="status-dot"
-                    :class="e.status ?? 'published'"
-                    :title="STATUS_LABEL[e.status ?? 'published']"
-                  ></span>
-                  <span v-html="highlight(e.title, searchQ)"></span>
-                </div>
-                <div v-if="e.category || e.tags.length" class="kb-item-tags">
-                  <span v-if="e.category" class="badge">📁 {{ e.category }}</span>
-                  <span v-for="t in e.tags" :key="t" class="badge">{{ t }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
+            # 全部
+          </span>
+          <span
+            v-for="t in tags"
+            :key="t.name"
+            class="cloud-tag"
+            :class="{ active: searchQ.trim() === t.name }"
+            :style="{ fontSize: tagCloudSize(t.count) + 'px' }"
+            @click="searchQ = t.name; doSearch()"
+          >
+            # {{ t.name }}
+          </span>
+          <span v-if="!tags.length" class="muted" style="font-size: 13px">暂无标签</span>
         </div>
-        <div v-else class="empty">暂无文章</div>
-      </div>
-      </template>
 
-      <!-- 列表视图：热词标签 -->
-      <template v-else>
-        <div class="kb-right-list">
-          <div class="right-title">热门标签</div>
-          <div v-if="tags.length" class="hot-tags">
-            <span
-              v-for="t in tags"
-              :key="t.name"
-              class="badge hot-tag"
-              @click="searchQ = t.name; doSearch()"
-            >
-              {{ t.name }} ({{ t.count }})
-            </span>
+        <hr class="rate-divider" />
+
+        <div class="right-title" style="margin-top: 4px">📂 分类</div>
+        <div class="cat-nav">
+          <div
+            class="nav-item"
+            :class="{ active: !!activeCategory }"
+            @click="activeCategory = ''"
+          >
+            <span class="nav-ico">📁</span> 全部知识
           </div>
-          <div v-else class="muted" style="font-size: 13px; padding: 4px 8px">暂无标签</div>
+          <div v-if="categories.length" class="cat-tree">
+            <CategoryTree
+              :nodes="categories"
+              :active-path="activeCategory"
+              @select="selectCategory"
+              @remove="removeCategory"
+              @rename="renameCategory"
+            />
+          </div>
+          <div v-else class="muted cat-empty">暂无分类</div>
         </div>
-      </template>
+
+        <hr class="rate-divider" />
+        <div class="cat-nav">
+          <div class="nav-item" @click="showArchive">
+            <span class="nav-ico">📥</span> 归档
+          </div>
+          <div class="nav-item" :class="{ active: view === 'trash' }" @click="showTrash">
+            <span class="nav-ico">🗑️</span> 回收站
+          </div>
+        </div>
+
+        <div class="stats-box">
+          <div class="stat-item"><span>{{ entries.length }}</span> 文档</div>
+          <div class="stat-item"><span>{{ tags.length }}</span> 标签</div>
+          <div class="stat-item"><span>{{ totalWords }}</span> 字</div>
+        </div>
+
+        <div v-if="recentEntries.length" class="recent-section">
+          <div class="right-title" style="padding: 8px 8px 4px">最近访问</div>
+          <div
+            v-for="e in recentEntries"
+            :key="e.id"
+            class="recent-item"
+            :class="{ active: e.id === selectedId }"
+            @click="select(e.id)"
+          >
+            {{ e.title }}
+          </div>
+        </div>
+      </div>
     </aside>
 
     <!-- 抽屉遮罩 -->
@@ -1119,32 +1549,105 @@ function onKeydown(e: KeyboardEvent) {
   display: none;
 }
 
-/* 左栏 */
+/* 左栏：贴合背景的浅灰面板，非浮起卡片 */
 .kb-side {
   width: 260px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 16px 12px;
-  overflow-y: auto;
-  background: var(--panel);
+  gap: 6px;
+  padding: 14px 10px;
+  overflow: hidden;
+  background: var(--bg);
   border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.kb-side .kb-header,
+.kb-side .side-actions,
+.kb-side .add-cat,
+.kb-side .status-filter,
+.kb-side .sort-select {
+  flex-shrink: 0;
+}
+
+.kb-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.kb-logo {
+  font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.kb-logo span {
+  background: var(--primary);
+  color: #fff;
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 11px;
 }
 
 .kb-search {
-  padding: 9px 12px;
+  flex: 1;
+  min-width: 90px;
+  padding: 7px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.kb-search:focus {
+  border-color: var(--primary);
+}
+
+.btn-new {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-weight: 600;
   font-size: 14px;
   font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.2s;
+  text-align: center;
+}
+
+.btn-new:hover {
+  background: var(--primary-dark);
 }
 
 .side-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+/* 操作按钮行：并排均分 */
+.side-actions-row {
+  display: flex;
+  gap: 6px;
+}
+
+.side-actions-row .action-btn {
+  flex: 1;
+  justify-content: center;
+  text-align: center;
 }
 
 .add-cat {
@@ -1173,23 +1676,69 @@ function onKeydown(e: KeyboardEvent) {
   margin-top: 4px;
 }
 
-.cat-all {
+.cat-nav {
   display: flex;
-  justify-content: space-between;
-  padding: 7px 8px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px;
+}
+
+.cat-empty {
+  font-size: 13px;
+  padding: 6px 8px;
+}
+
+/* 右栏导航项 */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  color: var(--muted);
+  transition: background 0.2s, color 0.2s;
+  margin-bottom: 1px;
 }
 
-.cat-all:hover {
-  background: #f1f3f7;
+.nav-item:hover {
+  background: var(--panel);
+  color: var(--text);
 }
 
-.cat-all.active {
-  background: #eef2ff;
+.nav-item.active {
+  background: var(--primary-soft);
   color: var(--primary-dark);
+  font-weight: 500;
+}
+
+.nav-item .nav-ico {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.nav-item .count {
+  margin-left: auto;
+  font-size: 11px;
+  background: var(--border);
+  padding: 0 8px;
+  border-radius: 10px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.nav-item.active .count {
+  background: rgba(59, 130, 246, 0.2);
+  color: var(--primary-dark);
+}
+
+[data-theme='dark'] .nav-item.active .count {
+  color: var(--primary-dark);
+}
+
+[data-theme='dark'] .nav-item:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .trash-entry {
@@ -1205,9 +1754,9 @@ function onKeydown(e: KeyboardEvent) {
 .stats-box {
   display: flex;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 12px;
   border-top: 1px solid var(--border);
-  padding-top: 10px;
+  padding: 12px 8px 4px;
 }
 
 .stat-item {
@@ -1251,7 +1800,9 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 .recent-section {
-  margin-top: 8px;
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding: 8px 8px 0;
 }
 
 .recent-item {
@@ -1266,45 +1817,337 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 .recent-item:hover {
-  background: #f1f3f7;
+  background: var(--panel);
   color: var(--text);
 }
 
+[data-theme='dark'] .recent-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .recent-item.active {
-  background: #eef2ff;
+  background: var(--primary-soft);
   color: var(--primary-dark);
+}
+
+[data-theme='dark'] .recent-item.active {
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+}
+
+/* 左栏：文档列表 */
+.doc-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 2px;
+}
+
+.doc-list .right-title {
+  padding: 8px 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tree-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tree-title-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.tree-action {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 6px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tree-action:hover {
+  background: var(--panel);
+  color: var(--text);
+}
+
+/* 批量选择头部 */
+.batch-select-bar {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+}
+
+.batch-select-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.batch-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.batch-all input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.batch-exit {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* 树形移动选择器 */
+.move-picker-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.move-picker {
+  width: 340px;
+  max-height: 70vh;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.move-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.move-picker-close {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.move-picker-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px;
+}
+
+.move-picker-root {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.move-picker-root:hover {
+  background: #f1f3f7;
+}
+
+.move-picker-root.active {
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+  font-weight: 500;
+}
+
+[data-theme='dark'] .move-picker-root:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme='dark'] .move-picker {
+  background: var(--panel);
+}
+
+.move-picker-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+/* 中栏：空状态 */
+.empty-state {
+  min-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.empty-state-icon {
+  font-size: 56px;
+  opacity: 0.6;
+}
+
+.empty-state-title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.empty-state-sub {
+  font-size: 13px;
+  max-width: 360px;
+  line-height: 1.6;
 }
 
 /* 中栏：内容 */
 .kb-content {
   flex: 1;
   min-width: 0;
-  overflow-y: auto;
+  display: flex;
+  align-items: flex-start;
   background: var(--panel);
   border-radius: 12px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  position: relative;
+}
+
+/* 内容滚动区 */
+.content-scroll {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+}
+
+/* 目录浮窗（飞书样式）：固定于内容左侧，不随正文滚动 */
+.toc-float {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100%;
+  width: 200px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 12px 8px;
+}
+
+.toc-float-collapse {
+  display: flex;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 6px 8px;
+  transition: color 0.15s;
+}
+
+.toc-float-collapse:hover {
+  color: var(--primary-dark);
+}
+
+.toc-float-expand {
+  position: sticky;
+  top: 12px;
+  align-self: flex-start;
+  width: 30px;
+  height: 30px;
+  margin: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+  z-index: 30;
+}
+
+.toc-float-expand:hover {
+  background: var(--primary);
+  color: #fff;
+}
+
+.toc-float-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toc-float-item {
+  padding: 6px 8px;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 6px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.15s, color 0.15s;
+}
+
+.toc-float-item:hover {
+  background: #f1f3f7;
+}
+
+/* 飞书风格：当前项蓝色文字高亮，不加底块矩形 */
+.toc-float-item.active {
+  color: var(--primary-dark);
+  font-weight: 600;
+}
+
+[data-theme='dark'] .toc-float-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme='dark'] .toc-float-item.active {
+  color: var(--primary-dark);
+}
+
+[data-theme='dark'] .toc-float {
+  background: var(--panel);
 }
 
 .content-wrap {
   max-width: 900px;
   margin: 0 auto;
   padding: 28px 36px;
-}
-
-/* 左栏大纲标题 */
-.side-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 8px 8px 4px;
-}
-
-.toc-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
 }
 
 /* 中栏列表视图（卡片） */
@@ -1369,6 +2212,46 @@ function onKeydown(e: KeyboardEvent) {
   padding: 4px 8px;
 }
 
+.rate-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 10px 0;
+}
+
+/* 标签云（词云，瀑布流多列排列） */
+.tag-cloud {
+  columns: 2;
+  column-gap: 8px;
+  padding: 6px 10px 10px;
+  line-height: 1.5;
+}
+
+.cloud-tag {
+  break-inside: avoid;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-block;
+  margin: 2px 0;
+  transition: color 0.15s, background 0.15s, transform 0.15s;
+}
+
+.cloud-tag:hover {
+  color: var(--primary-dark);
+  transform: scale(1.06);
+}
+
+.cloud-tag.active {
+  background: var(--primary);
+  color: #fff;
+  padding: 1px 8px;
+  border-radius: 6px;
+}
+
+[data-theme='dark'] .cloud-tag:hover {
+  color: var(--primary-dark);
+}
+
 .hot-tag {
   cursor: pointer;
   transition: opacity 0.15s;
@@ -1426,9 +2309,26 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 .article-title {
-  margin: 0 0 12px;
+  margin: 0 0 8px;
   font-size: 26px;
   line-height: 1.3;
+}
+
+/* 文章 meta 行：分类 · 时间 · 阅读时长 */
+.doc-meta {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--muted);
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 14px;
+}
+
+.doc-meta .meta-tags {
+  font-size: 13px;
 }
 
 /* 面包屑 */
@@ -1479,27 +2379,6 @@ function onKeydown(e: KeyboardEvent) {
 .status-badge.archived {
   background: #fff7ed;
   color: #ea580c;
-}
-
-.status-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  margin-right: 4px;
-  vertical-align: middle;
-}
-
-.status-dot.draft {
-  background: var(--muted);
-}
-
-.status-dot.published {
-  background: var(--ok);
-}
-
-.status-dot.archived {
-  background: #ea580c;
 }
 
 .status-filter {
@@ -1600,9 +2479,8 @@ function onKeydown(e: KeyboardEvent) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--panel);
+  background: var(--bg);
   border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .right-title {
@@ -1618,29 +2496,6 @@ function onKeydown(e: KeyboardEvent) {
   flex: 1;
   overflow-y: auto;
   padding: 0 10px 10px;
-}
-
-.kb-toc {
-  max-height: 45%;
-  overflow-y: auto;
-  border-top: 1px solid var(--border);
-  padding: 0 10px 12px;
-}
-
-.toc-item {
-  padding: 6px 8px;
-  font-size: 13px;
-  cursor: pointer;
-  border-radius: 6px;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.toc-item:hover {
-  background: #f1f3f7;
-  color: var(--text);
 }
 
 .kb-item {
@@ -1673,10 +2528,6 @@ function onKeydown(e: KeyboardEvent) {
 .kb-item-title {
   font-size: 13px;
   font-weight: 600;
-}
-
-.pin-icon {
-  margin-right: 2px;
 }
 
 .sort-select {
@@ -1713,25 +2564,6 @@ function onKeydown(e: KeyboardEvent) {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.kb-check {
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--border);
-  border-radius: 4px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  color: #fff;
-  transition: all 0.15s;
-}
-
-.kb-check.on {
-  background: var(--primary);
-  border-color: var(--primary);
 }
 
 /* 图片放大预览 */
@@ -1821,6 +2653,10 @@ function onKeydown(e: KeyboardEvent) {
     inset: 0;
     background: rgba(15, 23, 42, 0.4);
     z-index: 150;
+  }
+  /* 小屏隐藏目录浮窗，避免遮挡正文 */
+  .toc-float {
+    display: none;
   }
 }
 

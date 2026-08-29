@@ -52,6 +52,7 @@ function toggle(path: string) {
         >
           {{ n.children.length ? (expanded.has(n.path) ? '▾' : '▸') : '' }}
         </span>
+        <span class="cat-folder">📁</span>
         <span class="cat-name">{{ n.name }}</span>
         <span class="cat-count">{{ n.count }}</span>
         <button class="cat-del" title="重命名" @click.stop="emit('rename', n.path)">✎</button>
@@ -108,6 +109,12 @@ function toggle(path: string) {
 
 .cat-toggle.leaf {
   cursor: default;
+}
+
+.cat-folder {
+  font-size: 13px;
+  flex-shrink: 0;
+  opacity: 0.8;
 }
 
 .cat-name {

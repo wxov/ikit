@@ -55,6 +55,8 @@ export class SqliteStore implements KnowledgeStore {
         content TEXT NOT NULL,
         tags TEXT NOT NULL DEFAULT '[]',
         category TEXT,
+        parent_id TEXT,
+        sort_order INTEGER,
         pinned INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -65,6 +67,16 @@ export class SqliteStore implements KnowledgeStore {
         path TEXT PRIMARY KEY
       );
     `)
+    // 迁移：为旧库补充 parent_id / sort_order 列
+    const cols = (this.db.prepare('PRAGMA table_info(entries)').all() as any[]).map(
+      (c) => c.name,
+    )
+    if (!cols.includes('parent_id')) {
+      this.db.exec('ALTER TABLE entries ADD COLUMN parent_id TEXT')
+    }
+    if (!cols.includes('sort_order')) {
+      this.db.exec('ALTER TABLE entries ADD COLUMN sort_order INTEGER')
+    }
   }
 
   async load(): Promise<KnowledgeDb> {
@@ -76,6 +88,8 @@ export class SqliteStore implements KnowledgeStore {
       content: r.content,
       tags: JSON.parse(r.tags),
       category: r.category ?? undefined,
+      parentId: r.parent_id ?? undefined,
+      sortOrder: r.sort_order ?? undefined,
       pinned: !!r.pinned,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
@@ -99,8 +113,8 @@ export class SqliteStore implements KnowledgeStore {
       this.db.exec('DELETE FROM entries')
       this.db.exec('DELETE FROM categories')
       const ins = this.db.prepare(`
-        INSERT INTO entries (id, title, content, tags, category, pinned, created_at, updated_at, deleted_at, embedding)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO entries (id, title, content, tags, category, parent_id, sort_order, pinned, created_at, updated_at, deleted_at, embedding)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       for (const e of data.entries) {
         ins.run(
@@ -109,6 +123,8 @@ export class SqliteStore implements KnowledgeStore {
           e.content,
           JSON.stringify(e.tags),
           e.category ?? null,
+          e.parentId ?? null,
+          e.sortOrder ?? null,
           e.pinned ? 1 : 0,
           e.createdAt,
           e.updatedAt,
