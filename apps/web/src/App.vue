@@ -71,7 +71,7 @@ onUnmounted(() => socket?.close())
         {{ theme === 'light' ? '🌙' : '☀️' }}
       </button>
     </header>
-    <main>
+    <main :class="{ wide: tab === 'knowledge' }">
       <SystemPanel v-if="tab === 'system'" />
       <AgentPanel v-else-if="tab === 'agent'" />
       <KnowledgePanel v-else />
