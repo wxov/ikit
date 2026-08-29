@@ -19,6 +19,8 @@ const STOP_WORDS = new Set([
 
 export type EmbedFn = (texts: string[]) => Promise<number[][]>
 
+export type SummarizeFn = (text: string) => Promise<string>
+
 function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || !a.length) return 0
   let dot = 0
@@ -87,6 +89,7 @@ export function createKnowledgeService(
   ctx: Context,
   store: KnowledgeStore,
   embed?: EmbedFn,
+  summarize?: SummarizeFn,
 ): KnowledgeService {
   const fuse = new Fuse<KnowledgeEntry>([], {
     keys: ['title', 'content', 'tags'],
@@ -301,6 +304,30 @@ export function createKnowledgeService(
       if (embed) await vectorize(entry)
       await store.save()
       await refreshFuse()
+      emitChange('update', entry)
+      return entry
+    },
+
+    async generateSummary(id) {
+      if (!summarize) return undefined
+      const db = await store.load()
+      const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
+      if (!entry) return undefined
+      const text = `标题：${entry.title}\n\n内容：${entry.content.slice(0, 3000)}`
+      const prompt = `请为下面这篇文章生成一段简洁的中文摘要（80字以内，直接输出摘要内容，不要任何其他说明或前缀）：\n\n${text}`
+      entry.summary = (await summarize(prompt)).trim()
+      await store.save()
+      await refreshFuse()
+      emitChange('update', entry)
+      return entry
+    },
+
+    async rate(id, rating) {
+      const db = await store.load()
+      const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
+      if (!entry) return undefined
+      entry.rating = Math.max(1, Math.min(5, Math.round(rating)))
+      await store.save()
       emitChange('update', entry)
       return entry
     },
