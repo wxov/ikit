@@ -12,6 +12,24 @@ const wsStatus = ref<WsStatus>('connecting')
 const events = ref<EventItem[]>([])
 const lastEvent = ref<EventItem | null>(null)
 
+// 暗色模式（默认跟随系统，可手动切换）
+const theme = ref<'light' | 'dark'>(
+  (localStorage.getItem('ikit-theme') as 'light' | 'dark') ??
+    (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+)
+
+function applyTheme() {
+  document.documentElement.dataset.theme = theme.value
+  localStorage.setItem('ikit-theme', theme.value)
+}
+
+function toggleTheme() {
+  theme.value = theme.value === 'light' ? 'dark' : 'light'
+  applyTheme()
+}
+
+applyTheme()
+
 provide('events', events)
 provide('lastEvent', lastEvent)
 
@@ -49,6 +67,9 @@ onUnmounted(() => socket?.close())
           wsStatus === 'open' ? '已连接' : wsStatus === 'connecting' ? '连接中' : '已断开'
         }}
       </span>
+      <button class="theme-toggle" :title="theme === 'light' ? '切换暗色' : '切换亮色'" @click="toggleTheme">
+        {{ theme === 'light' ? '🌙' : '☀️' }}
+      </button>
     </header>
     <main>
       <SystemPanel v-if="tab === 'system'" />
@@ -75,6 +96,16 @@ onUnmounted(() => socket?.close())
 </template>
 
 <style scoped>
+.theme-toggle {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+
 .bottom-tabbar {
   display: none;
 }
