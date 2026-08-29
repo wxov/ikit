@@ -390,6 +390,29 @@ async function rateEntry(rating: number) {
   if (searchQ.value.trim()) await doSearch()
 }
 
+async function likeEntry() {
+  if (!selected.value) return
+  await api(`/api/knowledge/entries/${selected.value.id}/like`, { method: 'POST' })
+  await load()
+  if (searchQ.value.trim()) await doSearch()
+}
+
+async function shareEntry() {
+  if (!selected.value) return
+  const r = await api<{ entry: KnowledgeEntry }>(
+    `/api/knowledge/entries/${selected.value.id}/share`,
+    { method: 'POST' },
+  )
+  const link = `${location.origin}/api/share/${r.entry.shareToken}`
+  try {
+    await navigator.clipboard.writeText(link)
+    notice.value = '分享链接已复制到剪贴板'
+  } catch {
+    prompt('分享链接（复制）：', link)
+  }
+  await load()
+}
+
 function exportEntry() {
   if (!selected.value) return
   const content = `# ${selected.value.title}\n\n${selected.value.content}`
@@ -884,6 +907,10 @@ function onKeydown(e: KeyboardEvent) {
                 <span v-for="t in selected.tags" :key="t" class="badge">{{ t }}</span>
               </div>
               <div class="row">
+                <button class="btn secondary sm" @click="likeEntry">
+                  👍 {{ selected.likes ?? 0 }}
+                </button>
+                <button class="btn secondary sm" @click="shareEntry">分享</button>
                 <button class="btn secondary sm" @click="togglePin">
                   {{ selected.pinned ? '取消置顶' : '置顶' }}
                 </button>

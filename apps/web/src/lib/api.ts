@@ -18,6 +18,8 @@ export interface KnowledgeEntry {
   history?: EntryVersion[]
   summary?: string
   rating?: number
+  likes?: number
+  shareToken?: string
   createdAt: string
   updatedAt: string
 }
