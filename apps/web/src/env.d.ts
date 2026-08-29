@@ -5,3 +5,9 @@ declare module '*.vue' {
   const component: DefineComponent<Record<string, unknown>, Record<string, unknown>, any>
   export default component
 }
+
+declare module 'markdown-it-katex' {
+  import type MarkdownIt from 'markdown-it'
+  const plugin: MarkdownIt.PluginSimple
+  export default plugin
+}
