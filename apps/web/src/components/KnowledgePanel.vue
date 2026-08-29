@@ -116,6 +116,10 @@ const tags = computed(() => {
     .slice(0, 20)
 })
 
+const totalWords = computed(() =>
+  entries.value.reduce((sum, e) => sum + (e.content?.length ?? 0), 0),
+)
+
 const categoryPaths = computed(() => {
   const paths: string[] = []
   const walk = (nodes: CategoryNode[]) => {
@@ -760,6 +764,12 @@ function onKeydown(e: KeyboardEvent) {
         <div v-else class="muted" style="font-size: 12px; padding: 4px 8px">暂无分类</div>
       </div>
 
+      <div class="stats-box">
+        <div class="stat-item"><span>{{ entries.length }}</span> 文档</div>
+        <div class="stat-item"><span>{{ tags.length }}</span> 标签</div>
+        <div class="stat-item"><span>{{ totalWords }}</span> 字</div>
+      </div>
+
       <div class="trash-entry" :class="{ active: view === 'trash' }" @click="showTrash">
         🗑 回收站
       </div>
@@ -1188,6 +1198,28 @@ function onKeydown(e: KeyboardEvent) {
   color: var(--muted);
   margin-top: 8px;
   border-top: 1px solid var(--border);
+}
+
+.stats-box {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.stat-item {
+  flex: 1;
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.stat-item span {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
 }
 
 .trash-entry:hover {
