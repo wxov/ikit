@@ -141,6 +141,7 @@ export function createKnowledgeService(
           content: input.content,
           tags: input.tags ?? [],
           category,
+          status: 'published',
           createdAt: now,
           updatedAt: now,
         }
@@ -166,6 +167,7 @@ export function createKnowledgeService(
         content: input.content,
         tags: input.tags ?? [],
         category,
+        status: 'draft',
         createdAt: now,
         updatedAt: now,
       }
@@ -205,10 +207,27 @@ export function createKnowledgeService(
             : undefined
           : prev.category
       if (category) ensureCategory(db, category)
+
+      const newTitle = patch.title?.trim() ?? prev.title
+      const newContent = patch.content ?? prev.content
+
+      // 版本历史：标题或内容变化时保存旧版本
+      if (newTitle !== prev.title || newContent !== prev.content) {
+        const history = prev.history ?? []
+        history.unshift({
+          version: (history[0]?.version ?? 0) + 1,
+          title: prev.title,
+          content: prev.content,
+          updatedAt: prev.updatedAt,
+        })
+        if (history.length > 20) history.length = 20
+        prev.history = history
+      }
+
       const entry: KnowledgeEntry = {
         ...prev,
-        title: patch.title?.trim() ?? prev.title,
-        content: patch.content ?? prev.content,
+        title: newTitle,
+        content: newContent,
         tags: patch.tags ?? prev.tags,
         category,
         updatedAt: new Date().toISOString(),
@@ -241,6 +260,45 @@ export function createKnowledgeService(
       if (!entry) return undefined
       entry.pinned = !entry.pinned
       entry.updatedAt = new Date().toISOString()
+      await store.save()
+      await refreshFuse()
+      emitChange('update', entry)
+      return entry
+    },
+
+    async setStatus(id, status) {
+      const db = await store.load()
+      const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
+      if (!entry) return undefined
+      entry.status = status
+      entry.updatedAt = new Date().toISOString()
+      await store.save()
+      await refreshFuse()
+      emitChange('update', entry)
+      return entry
+    },
+
+    async restoreVersion(id, version) {
+      const db = await store.load()
+      const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
+      if (!entry) return undefined
+      const target = entry.history?.find((h) => h.version === version)
+      if (!target) return undefined
+      // 当前版本也存入历史
+      const history = entry.history ?? []
+      history.unshift({
+        version: (history[0]?.version ?? 0) + 1,
+        title: entry.title,
+        content: entry.content,
+        updatedAt: entry.updatedAt,
+      })
+      if (history.length > 20) history.length = 20
+      entry.history = history
+      // 恢复目标版本
+      entry.title = target.title
+      entry.content = target.content
+      entry.updatedAt = new Date().toISOString()
+      if (embed) await vectorize(entry)
       await store.save()
       await refreshFuse()
       emitChange('update', entry)

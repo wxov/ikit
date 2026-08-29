@@ -95,6 +95,28 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     return { entry }
   })
 
+  app.post('/api/knowledge/entries/:id/status', async (req, reply) => {
+    const id = (req.params as { id: string }).id
+    const body = req.body as { status?: string }
+    if (!['draft', 'published', 'archived'].includes(body?.status ?? '')) {
+      return reply.code(400).send({ error: 'status must be draft/published/archived' })
+    }
+    const entry = await ctx.knowledge.setStatus(id, body.status as any)
+    if (!entry) return reply.code(404).send({ error: 'entry not found' })
+    return { entry }
+  })
+
+  app.post('/api/knowledge/entries/:id/restore', async (req, reply) => {
+    const id = (req.params as { id: string }).id
+    const body = req.body as { version?: number }
+    if (typeof body?.version !== 'number') {
+      return reply.code(400).send({ error: 'version is required' })
+    }
+    const entry = await ctx.knowledge.restoreVersion(id, body.version)
+    if (!entry) return reply.code(404).send({ error: 'entry or version not found' })
+    return { entry }
+  })
+
   // ---- 回收站 ----
   app.get('/api/knowledge/trash', async () => ({
     entries: await ctx.knowledge.listTrash(),
