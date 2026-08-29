@@ -23,6 +23,10 @@ export interface KnowledgeEntry {
   summary?: string
   /** 星级评分（1-5） */
   rating?: number
+  /** 点赞数 */
+  likes?: number
+  /** 外部分享令牌 */
+  shareToken?: string
   /** 软删除标记（回收站） */
   deletedAt?: string
   createdAt: string
@@ -69,6 +73,9 @@ export interface KnowledgeService {
   restoreVersion(id: string, version: number): Promise<KnowledgeEntry | undefined>
   generateSummary(id: string): Promise<KnowledgeEntry | undefined>
   rate(id: string, rating: number): Promise<KnowledgeEntry | undefined>
+  like(id: string): Promise<KnowledgeEntry | undefined>
+  generateShareLink(id: string): Promise<KnowledgeEntry | undefined>
+  getByShareToken(token: string): Promise<KnowledgeEntry | undefined>
   listTrash(): Promise<KnowledgeEntry[]>
   restore(id: string): Promise<boolean>
   purge(id: string): Promise<boolean>

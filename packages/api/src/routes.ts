@@ -135,6 +135,37 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     return { entry }
   })
 
+  app.post('/api/knowledge/entries/:id/like', async (req, reply) => {
+    const id = (req.params as { id: string }).id
+    const entry = await ctx.knowledge.like(id)
+    if (!entry) return reply.code(404).send({ error: 'entry not found' })
+    return { entry }
+  })
+
+  app.post('/api/knowledge/entries/:id/share', async (req, reply) => {
+    const id = (req.params as { id: string }).id
+    const entry = await ctx.knowledge.generateShareLink(id)
+    if (!entry) return reply.code(404).send({ error: 'entry not found' })
+    return { entry }
+  })
+
+  // 公开分享访问（通过 token，无需认证）
+  app.get('/api/share/:token', async (req, reply) => {
+    const token = (req.params as { token: string }).token
+    const entry = await ctx.knowledge.getByShareToken(token)
+    if (!entry) return reply.code(404).send({ error: 'share not found' })
+    return {
+      title: entry.title,
+      content: entry.content,
+      tags: entry.tags,
+      category: entry.category,
+      summary: entry.summary,
+      rating: entry.rating,
+      likes: entry.likes,
+      updatedAt: entry.updatedAt,
+    }
+  })
+
   // ---- 回收站 ----
   app.get('/api/knowledge/trash', async () => ({
     entries: await ctx.knowledge.listTrash(),
