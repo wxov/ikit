@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">i-kit</string>
+    <string name="title_activity_main">i-kit</string>
+    <string name="package_name">com.ikit.app</string>
+    <string name="custom_url_scheme">com.ikit.app</string>
+</resources>
