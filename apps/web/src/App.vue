@@ -55,5 +55,69 @@ onUnmounted(() => socket?.close())
       <AgentPanel v-else-if="tab === 'agent'" />
       <KnowledgePanel v-else />
     </main>
+
+    <!-- 移动端底部 Tab Bar -->
+    <nav class="bottom-tabbar">
+      <button :class="{ active: tab === 'system' }" @click="tab = 'system'">
+        <span class="tab-icon">⚙️</span>
+        <span class="tab-label">系统</span>
+      </button>
+      <button :class="{ active: tab === 'agent' }" @click="tab = 'agent'">
+        <span class="tab-icon">🤖</span>
+        <span class="tab-label">Agent</span>
+      </button>
+      <button :class="{ active: tab === 'knowledge' }" @click="tab = 'knowledge'">
+        <span class="tab-icon">📚</span>
+        <span class="tab-label">知识库</span>
+      </button>
+    </nav>
   </div>
 </template>
+
+<style scoped>
+.bottom-tabbar {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .topbar nav {
+    display: none;
+  }
+  .bottom-tabbar {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    z-index: 400;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .bottom-tabbar button {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .bottom-tabbar button.active {
+    color: var(--primary-dark);
+    font-weight: 600;
+  }
+  .tab-icon {
+    font-size: 18px;
+    line-height: 1;
+  }
+  main {
+    padding-bottom: 72px;
+  }
+}
+</style>

@@ -16,6 +16,8 @@ export interface KnowledgeEntry {
   pinned?: boolean
   status?: 'draft' | 'published' | 'archived'
   history?: EntryVersion[]
+  summary?: string
+  rating?: number
   createdAt: string
   updatedAt: string
 }

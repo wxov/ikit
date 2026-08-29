@@ -19,6 +19,10 @@ export interface KnowledgeEntry {
   status?: 'draft' | 'published' | 'archived'
   /** 版本历史（旧版本，最新的在前） */
   history?: EntryVersion[]
+  /** AI 生成的摘要 */
+  summary?: string
+  /** 星级评分（1-5） */
+  rating?: number
   /** 软删除标记（回收站） */
   deletedAt?: string
   createdAt: string
@@ -63,6 +67,8 @@ export interface KnowledgeService {
   togglePin(id: string): Promise<KnowledgeEntry | undefined>
   setStatus(id: string, status: 'draft' | 'published' | 'archived'): Promise<KnowledgeEntry | undefined>
   restoreVersion(id: string, version: number): Promise<KnowledgeEntry | undefined>
+  generateSummary(id: string): Promise<KnowledgeEntry | undefined>
+  rate(id: string, rating: number): Promise<KnowledgeEntry | undefined>
   listTrash(): Promise<KnowledgeEntry[]>
   restore(id: string): Promise<boolean>
   purge(id: string): Promise<boolean>
