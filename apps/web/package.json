@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:desktop": "cross-env VITE_API_BASE=http://localhost:3000 vite build",
+    "build:desktop": "cross-env VITE_API_BASE=http://119.28.90.174 vite build",
     "build:mobile": "cross-env VITE_API_BASE=http://192.168.1.100:3000 vite build",
     "preview": "vite preview",
     "tauri": "tauri",
