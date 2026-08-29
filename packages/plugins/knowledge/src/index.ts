@@ -5,7 +5,7 @@ import type { Context } from 'cordis'
 import type { LlmService } from '@ikit/plugin-llm'
 import type { KnowledgeDb, KnowledgeEntry } from './types.js'
 import { JsonStore, SqliteStore, type KnowledgeStore } from './store.js'
-import { createKnowledgeService, type EmbedFn } from './service.js'
+import { createKnowledgeService, type EmbedFn, type SummarizeFn } from './service.js'
 
 declare module 'cordis' {
   interface Events<C extends Context = Context> {
@@ -45,6 +45,12 @@ export function apply(ctx: Context, config: Config) {
   const embed: EmbedFn | undefined = llm?.embeddingEnabled
     ? (texts) => llm.embed(texts)
     : undefined
+  const summarize: SummarizeFn | undefined = llm?.configured
+    ? async (text) => {
+        const resp = await llm.chat([{ role: 'user', content: text }])
+        return resp.message.content ?? ''
+      }
+    : undefined
 
   const jsonFile = path.resolve(dataDir, filename)
   let store: KnowledgeStore
@@ -62,7 +68,7 @@ export function apply(ctx: Context, config: Config) {
     storageLabel = `json:${jsonFile}`
   }
 
-  const service = createKnowledgeService(ctx, store, embed)
+  const service = createKnowledgeService(ctx, store, embed, summarize)
 
   ctx.set('knowledge', service)
   ctx.on('dispose', () => {

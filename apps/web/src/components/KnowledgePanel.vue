@@ -105,6 +105,17 @@ function onSearchInput() {
   searchTimer = setTimeout(doSearch, 300)
 }
 
+const tags = computed(() => {
+  const map = new Map<string, number>()
+  for (const e of entries.value) {
+    for (const t of e.tags) map.set(t, (map.get(t) ?? 0) + 1)
+  }
+  return [...map.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 20)
+})
+
 const categoryPaths = computed(() => {
   const paths: string[] = []
   const walk = (nodes: CategoryNode[]) => {
@@ -349,6 +360,34 @@ async function restoreVersion(version: number) {
   await load()
   if (searchQ.value.trim()) await doSearch()
   notice.value = `已回滚到版本 v${version}`
+}
+
+// AI 摘要
+const summarizing = ref(false)
+
+async function generateSummary() {
+  if (!selected.value || summarizing.value) return
+  summarizing.value = true
+  try {
+    await api(`/api/knowledge/entries/${selected.value.id}/summary`, { method: 'POST' })
+    await load()
+    if (searchQ.value.trim()) await doSearch()
+    notice.value = '摘要已生成'
+  } catch (e: any) {
+    error.value = e.message
+  } finally {
+    summarizing.value = false
+  }
+}
+
+async function rateEntry(rating: number) {
+  if (!selected.value) return
+  await api(`/api/knowledge/entries/${selected.value.id}/rate`, {
+    method: 'POST',
+    body: JSON.stringify({ rating }),
+  })
+  await load()
+  if (searchQ.value.trim()) await doSearch()
 }
 
 function exportEntry() {
@@ -600,8 +639,30 @@ function onKeydown(e: KeyboardEvent) {
       <button class="tb-btn" title="文章列表" @click="showRight = true">📄</button>
     </header>
 
-    <!-- 左栏：搜索 / 分类树 / 操作 -->
+    <!-- 左栏：详情视图显示大纲 TOC，列表视图显示目录树 -->
     <aside class="kb-side" :class="{ open: showSidebar }">
+      <!-- 详情视图：大纲 TOC -->
+      <template v-if="selected && !editing">
+        <button class="btn secondary sm" style="align-self: flex-start" @click="selectedId = ''">
+          ← 返回列表
+        </button>
+        <div class="side-title">目录大纲</div>
+        <div v-if="rendered.toc.length" class="toc-list">
+          <div
+            v-for="h in rendered.toc"
+            :key="h.id"
+            class="toc-item"
+            :style="{ paddingLeft: 8 + (h.level - 1) * 14 + 'px' }"
+            @click="scrollToHeading(h.id)"
+          >
+            {{ h.text }}
+          </div>
+        </div>
+        <div v-else class="muted" style="font-size: 12px; padding: 4px 8px">无标题大纲</div>
+      </template>
+
+      <!-- 列表视图：目录树 + 操作 -->
+      <template v-else>
       <input
         ref="searchInput"
         v-model="searchQ"
@@ -692,6 +753,7 @@ function onKeydown(e: KeyboardEvent) {
           {{ e.title }}
         </div>
       </div>
+      </template>
     </aside>
 
     <!-- 中栏：文章内容（Markdown 渲染） -->
@@ -722,7 +784,30 @@ function onKeydown(e: KeyboardEvent) {
           <div v-else class="empty">回收站为空</div>
         </div>
 
-        <div v-else-if="!editing && !selected" class="empty">从右侧选择文章查看内容</div>
+        <div v-else-if="!editing && !selected" class="list-view">
+          <div class="list-header">
+            <h3 style="margin: 0">{{ searchQ.trim() ? '搜索结果' : '知识库' }}</h3>
+            <span class="muted">{{ display.length }} 篇</span>
+          </div>
+          <div v-if="display.length" class="card-list">
+            <div v-for="e in display" :key="e.id" class="card-item" @click="select(e.id)">
+              <div class="card-title">
+                <span v-if="e.pinned" class="pin-icon">📌</span>
+                <span v-html="highlight(e.title, searchQ)"></span>
+              </div>
+              <div v-if="e.category || e.tags.length" class="card-tags">
+                <span v-if="e.category" class="badge">📁 {{ e.category }}</span>
+                <span v-for="t in e.tags" :key="t" class="badge">{{ t }}</span>
+              </div>
+              <div class="card-summary muted">{{ e.summary || e.content.slice(0, 120) }}</div>
+              <div class="card-meta muted">
+                <span class="status-dot" :class="e.status ?? 'published'"></span>
+                {{ STATUS_LABEL[e.status ?? 'published'] }} · {{ new Date(e.updatedAt).toLocaleDateString() }}
+              </div>
+            </div>
+          </div>
+          <div v-else class="empty">暂无文章，点击「＋ 新建」或「导入」开始</div>
+        </div>
 
         <div v-else-if="editing" class="editor">
           <h3 style="margin-top: 0">{{ selectedId && selected ? '编辑' : '新建' }}文章</h3>
@@ -814,6 +899,34 @@ function onKeydown(e: KeyboardEvent) {
               更新于 {{ new Date(selected.updatedAt).toLocaleString() }}
             </div>
           </header>
+
+          <!-- AI 摘要 + 评分 -->
+          <div class="summary-row">
+            <div class="summary-box">
+              <div class="summary-head">
+                <span class="summary-label">摘要</span>
+                <button
+                  class="btn secondary sm"
+                  :disabled="summarizing"
+                  @click="generateSummary"
+                >
+                  {{ summarizing ? '生成中…' : selected.summary ? '重新生成' : 'AI 生成摘要' }}
+                </button>
+              </div>
+              <div v-if="selected.summary" class="summary-text">{{ selected.summary }}</div>
+            </div>
+            <div class="rating-row">
+              <span class="muted" style="margin-right: 4px">评分</span>
+              <span
+                v-for="n in 5"
+                :key="n"
+                class="star"
+                :class="{ on: (selected.rating ?? 0) >= n }"
+                @click="rateEntry(n)"
+              >★</span>
+            </div>
+          </div>
+
           <article class="markdown-body" v-html="rendered.html"></article>
 
           <!-- 版本历史 -->
@@ -839,8 +952,10 @@ function onKeydown(e: KeyboardEvent) {
       </div>
     </section>
 
-    <!-- 右栏：文章列表 + 目录 -->
+    <!-- 右栏：详情视图显示文章列表，列表视图显示热词标签 -->
     <aside class="kb-right" :class="{ open: showRight }">
+      <!-- 详情视图：文章列表 -->
+      <template v-if="selected">
       <div class="kb-right-list">
         <div class="right-title" style="display: flex; justify-content: space-between; align-items: center; gap: 8px">
           文章列表
@@ -899,19 +1014,25 @@ function onKeydown(e: KeyboardEvent) {
         </div>
         <div v-else class="empty">暂无文章</div>
       </div>
+      </template>
 
-      <div v-if="!editing && rendered.toc.length" class="kb-toc">
-        <div class="right-title">目录</div>
-        <div
-          v-for="h in rendered.toc"
-          :key="h.id"
-          class="toc-item"
-          :style="{ paddingLeft: 8 + (h.level - 1) * 14 + 'px' }"
-          @click="scrollToHeading(h.id)"
-        >
-          {{ h.text }}
+      <!-- 列表视图：热词标签 -->
+      <template v-else>
+        <div class="kb-right-list">
+          <div class="right-title">热门标签</div>
+          <div v-if="tags.length" class="hot-tags">
+            <span
+              v-for="t in tags"
+              :key="t.name"
+              class="badge hot-tag"
+              @click="searchQ = t.name; doSearch()"
+            >
+              {{ t.name }} ({{ t.count }})
+            </span>
+          </div>
+          <div v-else class="muted" style="font-size: 13px; padding: 4px 8px">暂无标签</div>
         </div>
-      </div>
+      </template>
     </aside>
 
     <!-- 抽屉遮罩 -->
@@ -931,6 +1052,16 @@ function onKeydown(e: KeyboardEvent) {
     <div v-if="lightboxSrc" class="lightbox" @click="closeLightbox">
       <img :src="lightboxSrc" alt="预览" />
     </div>
+
+    <!-- 移动端悬浮锚点按钮（详情页，打开大纲） -->
+    <button
+      v-if="selected && !editing"
+      class="fab-anchor"
+      title="目录大纲"
+      @click="showSidebar = true"
+    >
+      ☰
+    </button>
   </div>
 </template>
 
@@ -1091,9 +1222,96 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 .content-wrap {
-  max-width: 860px;
+  max-width: 900px;
   margin: 0 auto;
   padding: 28px 36px;
+}
+
+/* 左栏大纲标题 */
+.side-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 8px 8px 4px;
+}
+
+.toc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 中栏列表视图（卡片） */
+.list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.card-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.card-item {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.card-item:hover {
+  border-color: var(--primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.card-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.card-tags {
+  margin-bottom: 8px;
+}
+
+.card-summary {
+  font-size: 13px;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card-meta {
+  margin-top: 8px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 热词标签 */
+.hot-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 8px;
+}
+
+.hot-tag {
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.hot-tag:hover {
+  opacity: 0.75;
 }
 
 .editor textarea {
@@ -1131,7 +1349,7 @@ function onKeydown(e: KeyboardEvent) {
   padding: 0 1px;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .editor-grid {
     grid-template-columns: 1fr;
   }
@@ -1249,6 +1467,66 @@ function onKeydown(e: KeyboardEvent) {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+/* AI 摘要 + 评分 */
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 20px;
+}
+
+.summary-box {
+  flex: 1;
+  min-width: 0;
+}
+
+.summary-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.summary-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.summary-text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.rating-row {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.star {
+  font-size: 20px;
+  color: #d1d5db;
+  cursor: pointer;
+  transition: color 0.15s, transform 0.1s;
+}
+
+.star:hover {
+  transform: scale(1.15);
+}
+
+.star.on {
+  color: #f59e0b;
 }
 
 /* 右栏：列表 + 目录 */
@@ -1432,21 +1710,23 @@ function onKeydown(e: KeyboardEvent) {
   display: none;
 }
 
-/* ===== 超宽屏（≥1600px）：利用更多空间 ===== */
-@media (min-width: 1600px) {
+/* 移动端悬浮锚点按钮 */
+.fab-anchor {
+  display: none;
+}
+
+/* ===== 超宽屏（≥1920px，PRD XL）：侧栏对齐详情页 260/280，正文保持 900 ===== */
+@media (min-width: 1920px) {
   .kb-side {
-    width: 240px;
+    width: 260px;
   }
   .kb-right {
-    width: 300px;
-  }
-  .content-wrap {
-    max-width: 1100px;
+    width: 280px;
   }
 }
 
-/* ===== 平板（≤1199px）：右栏变抽屉 ===== */
-@media (max-width: 1199px) {
+/* ===== 平板（≤1024px，PRD M）：右栏变抽屉 ===== */
+@media (max-width: 1024px) {
   .kb-right {
     position: fixed;
     top: 0;
@@ -1469,8 +1749,8 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-/* ===== 移动（≤767px）：左栏也变抽屉 + 工具栏 ===== */
-@media (max-width: 767px) {
+/* ===== 移动（≤768px，PRD S）：左栏也变抽屉 + 工具栏 ===== */
+@media (max-width: 768px) {
   .kb {
     flex-direction: column;
     height: calc(100dvh - 110px);
@@ -1521,6 +1801,24 @@ function onKeydown(e: KeyboardEvent) {
   }
   .article-title {
     font-size: 22px;
+  }
+  .fab-anchor {
+    display: flex;
+    position: fixed;
+    right: 16px;
+    bottom: 24px;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    z-index: 300;
+    cursor: pointer;
   }
 }
 </style>
