@@ -488,3 +488,32 @@ select {
 [data-theme='dark'] .status-dot.draft {
   background: #6b7280 !important;
 }
+
+/* 按钮暗色适配 */
+[data-theme='dark'] .btn.secondary {
+  background: #1e3a5f !important;
+  color: #60a5fa !important;
+}
+
+[data-theme='dark'] .btn.secondary:hover {
+  background: #274d7d !important;
+}
+
+[data-theme='dark'] .btn.danger {
+  background: #3b1f24 !important;
+  color: #f87171 !important;
+}
+
+/* 顶部导航暗色适配 */
+[data-theme='dark'] .topbar {
+  background: #16191f !important;
+}
+
+[data-theme='dark'] .topbar nav button {
+  color: #9ca3af !important;
+}
+
+[data-theme='dark'] .topbar nav button.active {
+  background: #1e3a5f !important;
+  color: #60a5fa !important;
+}
