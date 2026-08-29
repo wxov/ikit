@@ -1,0 +1,19 @@
+{
+  "name": "@ikit/plugin-knowledge",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "cordis": "^3.18.1",
+    "fuse.js": "^7.5.0"
+  },
+  "devDependencies": {
+    "@ikit/plugin-llm": "workspace:*",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.0"
+  }
+}

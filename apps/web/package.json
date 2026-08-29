@@ -1,0 +1,36 @@
+{
+  "name": "@ikit/web",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:desktop": "cross-env VITE_API_BASE=http://localhost:3000 vite build",
+    "build:mobile": "cross-env VITE_API_BASE=http://192.168.1.100:3000 vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "cap:add:android": "capacitor add android",
+    "cap:add:ios": "capacitor add ios",
+    "cap:sync": "capacitor sync",
+    "cap:open:android": "capacitor open android",
+    "cap:open:ios": "capacitor open ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/ios": "^7.0.0",
+    "highlight.js": "^11.12.0",
+    "markdown-it": "^15.0.1",
+    "vue": "^3.5.42"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0",
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/markdown-it": "^14.2.0",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "cross-env": "^7.0.3",
+    "typescript": "^5.7.0",
+    "vite": "^7.0.0"
+  }
+}

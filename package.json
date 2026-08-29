@@ -1,0 +1,23 @@
+{
+  "name": "i-kit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.2",
+  "description": "机器人 + Web 服务 + AI Agent 成套项目，基于 Cordis 插件架构",
+  "scripts": {
+    "dev": "pnpm --filter @ikit/server dev",
+    "dev:web": "pnpm --filter @ikit/web dev",
+    "build": "pnpm -r --if-present build",
+    "build:prod": "pnpm --filter @ikit/web build && pnpm --filter @ikit/server start",
+    "start": "pnpm --filter @ikit/server start"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

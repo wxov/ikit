@@ -1,0 +1,19 @@
+node_modules/
+dist/
+data/
+*.log
+.DS_Store
+.env
+.env.local
+.vite/
+
+# Tauri / Rust
+src-tauri/target/
+
+# Capacitor 原生工程（生成产物，可重新 cap add）
+apps/web/android/
+apps/web/ios/
+
+# 打包文件
+*.tar.gz
+*.zip

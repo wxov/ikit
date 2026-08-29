@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+dist
+**/dist
+src-tauri
+data
+**/data
+.git
+.gitignore
+.env
+.env.local
+*.log
+.vite
+scripts/deploy.ps1
+scripts/deploy.sh

@@ -1,0 +1,20 @@
+{
+  "name": "@ikit/server",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@ikit/api": "workspace:*",
+    "@ikit/core": "workspace:*",
+    "cordis": "^3.18.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.7.0"
+  }
+}
