@@ -1105,12 +1105,13 @@ function onKeydown(e: KeyboardEvent) {
 <style scoped>
 .kb {
   display: flex;
-  gap: 0;
+  gap: 12px;
   height: calc(100vh - 140px);
   height: calc(100dvh - 140px);
   padding: 0;
-  overflow: hidden;
   position: relative;
+  max-width: 1440px;
+  margin: 0 auto;
 }
 
 /* 工具栏：默认隐藏，移动端显示 */
@@ -1120,15 +1121,16 @@ function onKeydown(e: KeyboardEvent) {
 
 /* 左栏 */
 .kb-side {
-  width: 220px;
+  width: 260px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 16px 12px;
-  border-right: 1px solid var(--border);
   overflow-y: auto;
   background: var(--panel);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .kb-search {
@@ -1278,6 +1280,9 @@ function onKeydown(e: KeyboardEvent) {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
+  background: var(--panel);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .content-wrap {
@@ -1594,9 +1599,10 @@ function onKeydown(e: KeyboardEvent) {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--border);
   overflow: hidden;
   background: var(--panel);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .right-title {
@@ -1643,6 +1649,7 @@ function onKeydown(e: KeyboardEvent) {
   padding: 10px 12px;
   margin-bottom: 8px;
   cursor: pointer;
+  transition: all 0.15s;
 }
 
 .kb-item:hover {
@@ -1651,7 +1658,16 @@ function onKeydown(e: KeyboardEvent) {
 
 .kb-item.active {
   border-color: var(--primary);
-  background: #f5f8ff;
+  background: var(--primary);
+}
+
+.kb-item.active .kb-item-title {
+  color: #fff;
+}
+
+.kb-item.active .badge {
+  background: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .kb-item-title {
