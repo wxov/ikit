@@ -1,5 +1,12 @@
 import { apiUrl, wsUrl } from './config'
 
+export interface EntryVersion {
+  version: number
+  title: string
+  content: string
+  updatedAt: string
+}
+
 export interface KnowledgeEntry {
   id: string
   title: string
@@ -7,6 +14,8 @@ export interface KnowledgeEntry {
   tags: string[]
   category?: string
   pinned?: boolean
+  status?: 'draft' | 'published' | 'archived'
+  history?: EntryVersion[]
   createdAt: string
   updatedAt: string
 }

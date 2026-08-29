@@ -1,6 +1,8 @@
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js/lib/core'
+import markdownItKatex from 'markdown-it-katex'
 import 'highlight.js/styles/github-dark.css'
+import 'katex/dist/katex.min.css'
 
 // 按需注册常见语言（减小打包体积）
 import javascript from 'highlight.js/lib/languages/javascript'
@@ -78,6 +80,9 @@ const md = new MarkdownIt({
     return ''
   },
 })
+
+// 数学公式（KaTeX）：支持 $行内$ 和 $$块级$$
+md.use(markdownItKatex)
 
 // 渲染时收集标题，用于生成目录（TOC）
 let headings: TocItem[] = []

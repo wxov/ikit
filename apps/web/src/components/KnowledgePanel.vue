@@ -14,6 +14,8 @@ const activeCategory = ref('')
 const selectedId = ref(localStorage.getItem('ikit-kb-selected') ?? '')
 const loading = ref(false)
 const sortOption = ref<'updated' | 'title' | 'created'>('updated')
+const statusFilter = ref<'all' | 'draft' | 'published' | 'archived'>('all')
+const timeFilter = ref<'all' | '7d' | '30d' | '90d'>('all')
 const view = ref<'list' | 'trash'>('list')
 const trashEntries = ref<KnowledgeEntry[]>([])
 const error = ref('')
@@ -124,6 +126,14 @@ const display = computed(() => {
         e.category &&
         (e.category === activeCategory.value || e.category.startsWith(`${activeCategory.value}/`)),
     )
+  }
+  if (statusFilter.value !== 'all') {
+    base = base.filter((e) => (e.status ?? 'published') === statusFilter.value)
+  }
+  if (timeFilter.value !== 'all') {
+    const days = timeFilter.value === '7d' ? 7 : timeFilter.value === '30d' ? 30 : 90
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000
+    base = base.filter((e) => new Date(e.updatedAt).getTime() >= cutoff)
   }
   // 置顶优先
   return [...base].sort((a, b) => {
@@ -281,6 +291,64 @@ async function togglePin() {
   if (!selected.value) return
   await api(`/api/knowledge/entries/${selected.value.id}/toggle-pin`, { method: 'POST' })
   await load()
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  draft: '草稿',
+  published: '已发布',
+  archived: '已归档',
+}
+
+// 面包屑（分类路径拆分）
+const breadcrumbParts = computed(() => selected.value?.category?.split('/').filter(Boolean) ?? [])
+const breadcrumbPaths = computed(() => {
+  const paths: string[] = []
+  let cur = ''
+  for (const p of breadcrumbParts.value) {
+    cur = cur ? `${cur}/${p}` : p
+    paths.push(cur)
+  }
+  return paths
+})
+
+async function changeStatus(status: 'draft' | 'published' | 'archived') {
+  if (!selected.value) return
+  await api(`/api/knowledge/entries/${selected.value.id}/status`, {
+    method: 'POST',
+    body: JSON.stringify({ status }),
+  })
+  await load()
+  if (searchQ.value.trim()) await doSearch()
+  notice.value = `状态已改为「${STATUS_LABEL[status]}」`
+}
+
+// 图片放大预览
+const lightboxSrc = ref('')
+
+function onContentClick(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  if (target.tagName === 'IMG') {
+    lightboxSrc.value = target.getAttribute('src') ?? ''
+  }
+}
+
+function closeLightbox() {
+  lightboxSrc.value = ''
+}
+
+// 版本历史
+const showHistory = ref(false)
+
+async function restoreVersion(version: number) {
+  if (!selected.value) return
+  if (!confirm(`回滚到版本 v${version}？当前内容会保存为新版本。`)) return
+  await api(`/api/knowledge/entries/${selected.value.id}/restore`, {
+    method: 'POST',
+    body: JSON.stringify({ version }),
+  })
+  await load()
+  if (searchQ.value.trim()) await doSearch()
+  notice.value = `已回滚到版本 v${version}`
 }
 
 function exportEntry() {
@@ -570,6 +638,25 @@ function onKeydown(e: KeyboardEvent) {
       <div v-if="error" class="error" style="margin: 0">{{ error }}</div>
       <div v-if="notice" class="notice">{{ notice }}</div>
 
+      <div class="status-filter">
+        <div
+          v-for="s in ['all', 'draft', 'published', 'archived']"
+          :key="s"
+          class="status-filter-item"
+          :class="{ active: statusFilter === s }"
+          @click="statusFilter = s as any"
+        >
+          {{ s === 'all' ? '全部' : STATUS_LABEL[s] }}
+        </div>
+      </div>
+
+      <select v-model="timeFilter" class="sort-select" style="width: 100%">
+        <option value="all">全部时间</option>
+        <option value="7d">最近 7 天</option>
+        <option value="30d">最近 30 天</option>
+        <option value="90d">最近 90 天</option>
+      </select>
+
       <div class="cat-section">
         <div
           class="cat-all"
@@ -609,7 +696,7 @@ function onKeydown(e: KeyboardEvent) {
 
     <!-- 中栏：文章内容（Markdown 渲染） -->
     <section class="kb-content">
-      <div class="content-wrap">
+      <div class="content-wrap" @click="onContentClick">
         <div v-if="view === 'trash'" class="trash-view">
           <div class="row" style="justify-content: space-between; margin-bottom: 16px">
             <h3 style="margin: 0">回收站</h3>
@@ -674,7 +761,38 @@ function onKeydown(e: KeyboardEvent) {
 
         <template v-else-if="selected">
           <header class="article-head">
-            <h1 class="article-title">{{ selected.title }}</h1>
+            <!-- 面包屑导航 -->
+            <div v-if="breadcrumbParts.length" class="breadcrumb">
+              <span class="crumb" @click="activeCategory = ''">全部</span>
+              <template v-for="(part, i) in breadcrumbParts" :key="i">
+                <span class="crumb-sep">/</span>
+                <span class="crumb" @click="activeCategory = breadcrumbPaths[i]">{{ part }}</span>
+              </template>
+            </div>
+
+            <h1 class="article-title">
+              {{ selected.title }}
+              <span v-if="selected.pinned" class="pin-icon">📌</span>
+            </h1>
+
+            <!-- 状态徽标 + 切换 -->
+            <div class="status-row">
+              <span class="status-badge" :class="selected.status ?? 'published'">
+                {{ STATUS_LABEL[selected.status ?? 'published'] }}
+              </span>
+              <div class="row" style="gap: 6px">
+                <button
+                  v-for="s in ['draft', 'published', 'archived']"
+                  :key="s"
+                  class="btn sm"
+                  :class="(selected.status ?? 'published') === s ? '' : 'secondary'"
+                  @click="changeStatus(s as any)"
+                >
+                  {{ STATUS_LABEL[s] }}
+                </button>
+              </div>
+            </div>
+
             <div class="row" style="justify-content: space-between">
               <div v-if="selected.category || selected.tags.length" class="article-tags">
                 <span v-if="selected.category" class="badge">📁 {{ selected.category }}</span>
@@ -685,6 +803,9 @@ function onKeydown(e: KeyboardEvent) {
                   {{ selected.pinned ? '取消置顶' : '置顶' }}
                 </button>
                 <button class="btn secondary sm" @click="exportEntry">导出</button>
+                <button class="btn secondary sm" @click="showHistory = !showHistory">
+                  历史{{ selected.history?.length ? `(${selected.history.length})` : '' }}
+                </button>
                 <button class="btn secondary sm" @click="openEdit">编辑</button>
                 <button class="btn danger sm" @click="remove">删除</button>
               </div>
@@ -694,6 +815,26 @@ function onKeydown(e: KeyboardEvent) {
             </div>
           </header>
           <article class="markdown-body" v-html="rendered.html"></article>
+
+          <!-- 版本历史 -->
+          <div v-if="showHistory" class="history-panel">
+            <div class="history-head">版本历史</div>
+            <div v-if="selected.history?.length">
+              <div v-for="h in selected.history" :key="h.version" class="history-item">
+                <div class="row" style="justify-content: space-between">
+                  <div>
+                    <span class="badge">v{{ h.version }}</span>
+                    <span class="muted" style="margin-left: 6px">
+                      {{ new Date(h.updatedAt).toLocaleString() }}
+                    </span>
+                  </div>
+                  <button class="btn secondary sm" @click="restoreVersion(h.version)">回滚</button>
+                </div>
+                <div class="muted history-title">标题：{{ h.title }}</div>
+              </div>
+            </div>
+            <div v-else class="muted">暂无历史版本（编辑保存后会自动记录）</div>
+          </div>
         </template>
       </div>
     </section>
@@ -741,6 +882,11 @@ function onKeydown(e: KeyboardEvent) {
               <div style="flex: 1; min-width: 0">
                 <div class="kb-item-title">
                   <span v-if="e.pinned" class="pin-icon">📌</span>
+                  <span
+                    class="status-dot"
+                    :class="e.status ?? 'published'"
+                    :title="STATUS_LABEL[e.status ?? 'published']"
+                  ></span>
                   <span v-html="highlight(e.title, searchQ)"></span>
                 </div>
                 <div v-if="e.category || e.tags.length" class="kb-item-tags">
@@ -780,6 +926,11 @@ function onKeydown(e: KeyboardEvent) {
       @change="onFileSelect"
     />
     <input ref="dirInput" type="file" webkitdirectory hidden @change="onFileSelect" />
+
+    <!-- 图片放大预览 -->
+    <div v-if="lightboxSrc" class="lightbox" @click="closeLightbox">
+      <img :src="lightboxSrc" alt="预览" />
+    </div>
   </div>
 </template>
 
@@ -998,6 +1149,102 @@ function onKeydown(e: KeyboardEvent) {
   line-height: 1.3;
 }
 
+/* 面包屑 */
+.breadcrumb {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.crumb {
+  cursor: pointer;
+}
+
+.crumb:hover {
+  color: var(--primary-dark);
+}
+
+.crumb-sep {
+  margin: 0 6px;
+  color: var(--border);
+}
+
+/* 状态 */
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0;
+}
+
+.status-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.status-badge.draft {
+  background: #f1f3f7;
+  color: var(--muted);
+}
+
+.status-badge.published {
+  background: #ecfdf5;
+  color: var(--ok);
+}
+
+.status-badge.archived {
+  background: #fff7ed;
+  color: #ea580c;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.status-dot.draft {
+  background: var(--muted);
+}
+
+.status-dot.published {
+  background: var(--ok);
+}
+
+.status-dot.archived {
+  background: #ea580c;
+}
+
+.status-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.status-filter-item {
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--muted);
+  background: #f1f3f7;
+}
+
+.status-filter-item:hover {
+  background: #e4e7ec;
+}
+
+.status-filter-item.active {
+  background: var(--primary);
+  color: #fff;
+}
+
 .article-tags {
   display: flex;
   flex-wrap: wrap;
@@ -1132,6 +1379,52 @@ function onKeydown(e: KeyboardEvent) {
 .kb-check.on {
   background: var(--primary);
   border-color: var(--primary);
+}
+
+/* 图片放大预览 */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.85);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+
+.lightbox img {
+  max-width: 92%;
+  max-height: 92%;
+  border-radius: 8px;
+}
+
+.markdown-body img {
+  cursor: zoom-in;
+}
+
+/* 版本历史 */
+.history-panel {
+  margin-top: 24px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.history-head {
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.history-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.history-title {
+  margin-top: 4px;
+  font-size: 12px;
 }
 
 /* 抽屉遮罩 */
