@@ -332,6 +332,31 @@ export function createKnowledgeService(
       return entry
     },
 
+    async like(id) {
+      const db = await store.load()
+      const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
+      if (!entry) return undefined
+      entry.likes = (entry.likes ?? 0) + 1
+      await store.save()
+      emitChange('update', entry)
+      return entry
+    },
+
+    async generateShareLink(id) {
+      const db = await store.load()
+      const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
+      if (!entry) return undefined
+      entry.shareToken = entry.shareToken ?? randomUUID().replace(/-/g, '')
+      await store.save()
+      emitChange('update', entry)
+      return entry
+    },
+
+    async getByShareToken(token) {
+      const db = await store.load()
+      return db.entries.find((e) => e.shareToken === token && !e.deletedAt)
+    },
+
     async listTrash() {
       const db = await store.load()
       return db.entries.filter((e) => e.deletedAt)
