@@ -367,7 +367,7 @@ main.wide {
 }
 
 .markdown-body code {
-  background: #f1f3f7;
+  background: #eef0f4;
   border-radius: 4px;
   padding: 0.15em 0.4em;
   font-family: 'SF Mono', Consolas, monospace;
@@ -376,6 +376,7 @@ main.wide {
 
 .markdown-body pre {
   background: #0d1117;
+  color: #e2e8f0;
   border-radius: 10px;
   padding: 14px 16px;
   overflow-x: auto;
@@ -385,7 +386,7 @@ main.wide {
 .markdown-body pre code,
 .markdown-body pre code.hljs {
   background: transparent;
-  color: inherit;
+  color: #e2e8f0;
   padding: 0;
   font-size: 0.88em;
 }
@@ -430,4 +431,60 @@ main.wide {
 
 .markdown-body strong {
   font-weight: 700;
+}
+
+/* ==== 暗色主题下适配常见浅色组件（覆盖 scoped 组件样式） ==== */
+/* 输入控件用面板色，暗色下自动适配 */
+input,
+textarea,
+select {
+  background: var(--panel);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+[data-theme='dark'] .kb-item:hover,
+[data-theme='dark'] .kb-item.active,
+[data-theme='dark'] .cat-all:hover,
+[data-theme='dark'] .cat-all.active,
+[data-theme='dark'] .cat-row:hover,
+[data-theme='dark'] .cat-node.active > .cat-row,
+[data-theme='dark'] .recent-item:hover,
+[data-theme='dark'] .recent-item.active,
+[data-theme='dark'] .toc-item:hover,
+[data-theme='dark'] .toc-item {
+  background: #262b36 !important;
+}
+
+[data-theme='dark'] .kb-item.active,
+[data-theme='dark'] .cat-all.active,
+[data-theme='dark'] .cat-node.active > .cat-row,
+[data-theme='dark'] .recent-item.active {
+  background: #1e3a5f !important;
+  color: #60a5fa !important;
+}
+
+[data-theme='dark'] .msg-content {
+  background: #262b36 !important;
+}
+
+[data-theme='dark'] .step {
+  background: #2a2f3a !important;
+  border-left-color: #fbbf24 !important;
+}
+
+[data-theme='dark'] .summary-row {
+  background: #1a1d23 !important;
+}
+
+[data-theme='dark'] .markdown-body code {
+  background: #2a2f3a !important;
+}
+
+[data-theme='dark'] .status-badge.draft {
+  background: #262b36 !important;
+}
+
+[data-theme='dark'] .status-dot.draft {
+  background: #6b7280 !important;
 }
