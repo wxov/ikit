@@ -1120,7 +1120,7 @@ function onKeydown(e: KeyboardEvent) {
 
 /* 左栏 */
 .kb-side {
-  width: 210px;
+  width: 220px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -1590,7 +1590,7 @@ function onKeydown(e: KeyboardEvent) {
 
 /* 右栏：列表 + 目录 */
 .kb-right {
-  width: 250px;
+  width: 260px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;

@@ -128,6 +128,11 @@ main {
   margin: 0 auto;
 }
 
+/* 知识库页面更宽：容纳三栏（左260 + 中900 + 右280 ≈ 1440） */
+main.wide {
+  max-width: 1500px;
+}
+
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
