@@ -507,6 +507,33 @@ select {
   color: #60a5fa !important;
 }
 
+/* Markdown 表格暗色适配 */
+[data-theme='dark'] .markdown-body table {
+  border-color: #2a2f3a !important;
+}
+
+[data-theme='dark'] .markdown-body th {
+  background: #262b36 !important;
+  color: #e5e7eb !important;
+}
+
+[data-theme='dark'] .markdown-body td {
+  background: transparent !important;
+  color: #d1d5db !important;
+}
+
+[data-theme='dark'] .markdown-body th,
+[data-theme='dark'] .markdown-body td {
+  border-color: #2a2f3a !important;
+}
+
+/* Markdown 引用块暗色适配 */
+[data-theme='dark'] .markdown-body blockquote {
+  background: #1a1d23 !important;
+  color: #9ca3af !important;
+  border-left-color: #60a5fa !important;
+}
+
 [data-theme='dark'] .markdown-body code {
   background: #2a2f3a !important;
 }
