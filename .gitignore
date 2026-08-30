@@ -27,3 +27,6 @@ jdk21/
 
 # TypeScript build info
 *.tsbuildinfo
+
+# 热更新分发包（构建产物）
+update/
