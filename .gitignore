@@ -24,3 +24,6 @@ jdk21/
 *.tar.gz
 *.zip
 *.apk
+
+# TypeScript build info
+*.tsbuildinfo

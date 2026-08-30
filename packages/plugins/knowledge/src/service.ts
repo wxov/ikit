@@ -144,6 +144,10 @@ export function createKnowledgeService(
           content: input.content,
           tags: input.tags ?? [],
           category,
+          parentId: input.parentId || undefined,
+          sortOrder: db.entries.filter(
+            (e) => !e.deletedAt && (e.parentId || undefined) === (input.parentId || undefined),
+          ).length,
           status: 'published',
           createdAt: now,
           updatedAt: now,
@@ -170,6 +174,10 @@ export function createKnowledgeService(
         content: input.content,
         tags: input.tags ?? [],
         category,
+        parentId: input.parentId || undefined,
+        sortOrder: db.entries.filter(
+          (e) => !e.deletedAt && (e.parentId || undefined) === (input.parentId || undefined),
+        ).length,
         status: 'draft',
         createdAt: now,
         updatedAt: now,
@@ -255,6 +263,55 @@ export function createKnowledgeService(
       await refreshFuse()
       ctx.emit('knowledge:changed', { action: 'remove', entry })
       return true
+    },
+
+    async moveDoc(id, parentId) {
+      const db = await store.load()
+      const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
+      if (!entry) return undefined
+      const pid = parentId || undefined
+      entry.parentId = pid
+      // 移动到目标末尾
+      entry.sortOrder = db.entries.filter(
+        (e) => !e.deletedAt && (e.parentId || undefined) === pid && e.id !== id,
+      ).length
+      entry.updatedAt = new Date().toISOString()
+      await store.save()
+      await refreshFuse()
+      emitChange('update', entry)
+      return entry
+    },
+
+    async reorder(parentId, orderedIds) {
+      const db = await store.load()
+      const pid = parentId || undefined
+      let updated = 0
+      for (let i = 0; i < orderedIds.length; i++) {
+        const entry = db.entries.find(
+          (e) => e.id === orderedIds[i] && !e.deletedAt && (e.parentId || undefined) === pid,
+        )
+        if (entry) {
+          entry.sortOrder = i
+          updated++
+        }
+      }
+      if (updated) await store.save()
+      return { updated }
+    },
+
+    async getChildren(parentId) {
+      const db = await store.load()
+      const pid = parentId || undefined
+      return db.entries
+        .filter((e) => !e.deletedAt && (e.parentId || undefined) === pid)
+        .sort((a, b) => {
+          // 置顶优先，然后 sortOrder（未排序的按更新时间兜底）
+          if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1
+          const ao = a.sortOrder ?? Number.MAX_SAFE_INTEGER
+          const bo = b.sortOrder ?? Number.MAX_SAFE_INTEGER
+          if (ao !== bo) return ao - bo
+          return b.updatedAt.localeCompare(a.updatedAt)
+        })
     },
 
     async togglePin(id) {

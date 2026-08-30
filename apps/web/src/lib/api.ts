@@ -13,6 +13,8 @@ export interface KnowledgeEntry {
   content: string
   tags: string[]
   category?: string
+  parentId?: string
+  sortOrder?: number
   pinned?: boolean
   status?: 'draft' | 'published' | 'archived'
   history?: EntryVersion[]
