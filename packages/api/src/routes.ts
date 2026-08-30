@@ -62,6 +62,7 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
       content: body.content,
       tags: body.tags,
       category: body.category,
+      parentId: body.parentId,
     })
     return reply.code(201).send({ entry })
   })
@@ -79,6 +80,30 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     const entry = await ctx.knowledge.update(id, req.body as Partial<KnowledgeEntryInput>)
     if (!entry) return reply.code(404).send({ error: 'entry not found' })
     return { entry }
+  })
+
+  // 移动文档到新的父文档（parentId 为空 = 移动到顶层）
+  app.post('/api/knowledge/entries/:id/move', async (req, reply) => {
+    const id = (req.params as { id: string }).id
+    const body = req.body as { parentId?: string | null }
+    const entry = await ctx.knowledge.moveDoc(id, body?.parentId ?? undefined)
+    if (!entry) return reply.code(404).send({ error: 'entry not found' })
+    return { entry }
+  })
+
+  // 获取某文档的子文档（parentId 为空 = 顶层）
+  app.get('/api/knowledge/children', async (req) => {
+    const q = req.query as { parentId?: string }
+    return { entries: await ctx.knowledge.getChildren(q?.parentId || undefined) }
+  })
+
+  // 同级排序
+  app.post('/api/knowledge/reorder', async (req, reply) => {
+    const body = req.body as { parentId?: string | null; ids?: string[] }
+    if (!Array.isArray(body?.ids)) {
+      return reply.code(400).send({ error: 'ids array is required' })
+    }
+    return await ctx.knowledge.reorder(body?.parentId ?? undefined, body.ids)
   })
 
   app.delete('/api/knowledge/entries/:id', async (req, reply) => {

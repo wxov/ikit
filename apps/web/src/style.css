@@ -6,6 +6,7 @@
   --muted: #64748b;
   --primary: #3b82f6;
   --primary-dark: #2563eb;
+  --primary-soft: #eff6ff;
   --danger: #ef4444;
   --ok: #22c55e;
   --warn: #f59e0b;
@@ -22,6 +23,7 @@
   --muted: #94a3b8;
   --primary: #3b82f6;
   --primary-dark: #60a5fa;
+  --primary-soft: rgba(59, 130, 246, 0.16);
   --danger: #f87171;
   --ok: #4ade80;
   --warn: #fbbf24;
@@ -573,4 +575,201 @@ select {
 [data-theme='dark'] .topbar nav button.active {
   background: #1e3a5f !important;
   color: #60a5fa !important;
+}
+
+/* ===== 知识库：文档树（DocTreeItem 跨组件共享样式） ===== */
+.doc-tree-node {
+  min-width: 0;
+}
+
+.doc-item {
+  position: relative;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.doc-item:hover {
+  background: var(--panel);
+}
+
+[data-theme='dark'] .doc-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* 当前项：飞书风格 浅蓝底 + 深蓝字 */
+.doc-item.active {
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+  font-weight: 500;
+}
+
+.doc-item.active .doc-item-meta,
+.doc-item.active .status-dot,
+.doc-item.active .pin-icon,
+.doc-item.active .muted {
+  color: var(--primary-dark);
+}
+
+.doc-item.active .badge {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--primary-dark);
+}
+
+[data-theme='dark'] .doc-item.active,
+[data-theme='dark'] .doc-item.active .doc-item-meta,
+[data-theme='dark'] .doc-item.active .status-dot,
+[data-theme='dark'] .doc-item.active .pin-icon,
+[data-theme='dark'] .doc-item.active .muted {
+  color: var(--primary-dark);
+}
+
+.doc-item-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.doc-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.doc-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc-item-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.doc-item-meta {
+  margin-top: 4px;
+  font-size: 11px;
+}
+
+/* hover 操作按钮 + 菜单 */
+.doc-item-actions {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.doc-item:hover .doc-item-actions {
+  display: flex;
+}
+
+.ia-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.ia-btn:hover {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--primary-dark);
+}
+
+.doc-item.active .ia-btn {
+  color: var(--primary-dark);
+}
+.doc-item.active .ia-btn:hover {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--primary-dark);
+}
+
+.doc-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 2px);
+  right: 4px;
+  min-width: 180px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+}
+
+.doc-menu-item {
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.doc-menu-item:hover {
+  background: #f1f3f7;
+}
+
+[data-theme='dark'] .doc-menu-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme='dark'] .doc-menu {
+  background: var(--panel);
+}
+
+.kb-check {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #fff;
+  transition: all 0.15s;
+}
+
+.kb-check.on {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.pin-icon {
+  margin-right: 2px;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.status-dot.draft {
+  background: var(--muted);
+}
+
+.status-dot.published {
+  background: var(--ok);
+}
+
+.status-dot.archived {
+  background: #ea580c;
 }

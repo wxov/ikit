@@ -13,6 +13,10 @@ export interface KnowledgeEntry {
   tags: string[]
   /** 分类路径，如 "技术/前端"，可选 */
   category?: string
+  /** 父文档 id（用于文档树层级，根文档为空） */
+  parentId?: string
+  /** 同级排序序号（越小越靠前） */
+  sortOrder?: number
   /** 置顶/收藏标记 */
   pinned?: boolean
   /** 文档状态：草稿 / 已发布 / 已归档 */
@@ -40,6 +44,7 @@ export interface KnowledgeEntryInput {
   content: string
   tags?: string[]
   category?: string
+  parentId?: string
 }
 
 export interface KnowledgeSearchResult {
@@ -67,6 +72,9 @@ export interface KnowledgeService {
   list(options?: { limit?: number; offset?: number }): Promise<KnowledgeEntry[]>
   get(id: string): Promise<KnowledgeEntry | undefined>
   update(id: string, patch: Partial<KnowledgeEntryInput>): Promise<KnowledgeEntry | undefined>
+  moveDoc(id: string, parentId: string | undefined | null): Promise<KnowledgeEntry | undefined>
+  reorder(parentId: string | undefined | null, orderedIds: string[]): Promise<{ updated: number }>
+  getChildren(parentId: string | undefined): Promise<KnowledgeEntry[]>
   remove(id: string): Promise<boolean>
   togglePin(id: string): Promise<KnowledgeEntry | undefined>
   setStatus(id: string, status: 'draft' | 'published' | 'archived'): Promise<KnowledgeEntry | undefined>
