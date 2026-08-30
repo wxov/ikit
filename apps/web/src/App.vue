@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, provide } from 'vue'
 import { createSocket, type EventItem, type WsStatus } from './lib/api'
+import {
+  fetchUpdateManifest,
+  hasUpdate as hasUpdateFn,
+  applyUpdate,
+  versionGt,
+  detectPlatform,
+  type UpdateInfo,
+} from './lib/update'
 import SystemPanel from './components/SystemPanel.vue'
 import KnowledgePanel from './components/KnowledgePanel.vue'
 import AgentPanel from './components/AgentPanel.vue'
@@ -11,6 +19,40 @@ const tab = ref<Tab>('system')
 const wsStatus = ref<WsStatus>('connecting')
 const events = ref<EventItem[]>([])
 const lastEvent = ref<EventItem | null>(null)
+
+// 热更新
+const updateInfo = ref<UpdateInfo | null>(null)
+const updateAvailable = ref(false)
+const updating = ref(false)
+const updatePlatform = ref(detectPlatform())
+
+async function checkUpdate() {
+  const info = await fetchUpdateManifest()
+  updateInfo.value = info
+  if (hasUpdateFn(info)) {
+    updateAvailable.value = true
+  }
+}
+
+async function doUpdate() {
+  if (!updateInfo.value?.bundleUrl) return
+  updating.value = true
+  try {
+    const res = await applyUpdate(updateInfo.value, updateInfo.value.bundleUrl)
+    // Web 端已 reload；原生端若未接原生命令，则提供下载链接
+    if (!res.applied && res.platform !== 'web') {
+      window.open(res.url, '_blank')
+    }
+  } catch (e: any) {
+    console.warn('[update] apply failed:', e)
+  } finally {
+    updating.value = false
+  }
+}
+
+function dismissUpdate() {
+  updateAvailable.value = false
+}
 
 // 暗色模式（默认跟随系统，可手动切换）
 const theme = ref<'light' | 'dark'>(
@@ -47,6 +89,7 @@ onMounted(() => {
       wsStatus.value = status
     },
   )
+  checkUpdate()
 })
 
 onUnmounted(() => socket?.close())
@@ -71,6 +114,21 @@ onUnmounted(() => socket?.close())
         {{ theme === 'light' ? '🌙' : '☀️' }}
       </button>
     </header>
+
+    <!-- 热更新提示 -->
+    <div v-if="updateAvailable" class="update-banner">
+      <span class="ub-icon">🔄</span>
+      <span class="ub-text">
+        发现新版本
+        <b>v{{ updateInfo?.latest }}</b>
+        (当前 v{{ updateInfo?.currentVersion }})
+      </span>
+      <button class="ub-btn" :disabled="updating" @click="doUpdate">
+        {{ updating ? '更新中…' : updatePlatform === 'web' ? '刷新更新' : '立即更新' }}
+      </button>
+      <button class="ub-dismiss" title="稍后" @click="dismissUpdate">×</button>
+    </div>
+
     <main :class="{ wide: tab === 'knowledge' }">
       <SystemPanel v-if="tab === 'system'" />
       <AgentPanel v-else-if="tab === 'agent'" />
@@ -96,6 +154,49 @@ onUnmounted(() => socket?.close())
 </template>
 
 <style scoped>
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 16px 0;
+  padding: 10px 14px;
+  background: var(--primary-soft);
+  border: 1px solid var(--primary);
+  border-radius: 10px;
+  color: var(--primary-dark);
+  font-size: 13px;
+  animation: ub-in 0.3s ease;
+}
+@keyframes ub-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ub-icon { font-size: 16px; }
+.ub-text { flex: 1; }
+.ub-btn {
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ub-btn:disabled { opacity: 0.6; cursor: default; }
+.ub-dismiss {
+  border: none;
+  background: transparent;
+  color: var(--primary-dark);
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+}
+[data-theme='dark'] .update-banner {
+  color: var(--primary-dark);
+}
+
 .theme-toggle {
   border: 1px solid var(--border);
   background: var(--panel);

@@ -42,6 +42,9 @@ const HOST = process.env.HOST ?? '0.0.0.0'
 // 注：pnpm --filter 在包目录运行，process.cwd() = packages/server
 const defaultDist = path.resolve(process.cwd(), '../../apps/web/dist')
 const staticRoot = process.env.WEB_DIST ?? (existsSync(defaultDist) ? defaultDist : undefined)
+// 热更新分发包根目录：项目根/update（含 <version>/web-update.zip）
+const defaultUpdate = path.resolve(process.cwd(), '../../update')
+const updateRoot = existsSync(defaultUpdate) ? defaultUpdate : undefined
 
 async function main() {
   const ctx = await createCore({
@@ -61,7 +64,7 @@ async function main() {
 
   const app = await createApi(ctx, {
     name: 'i-kit',
-    version: '0.1.0',
+    version: '0.1.2',
     plugins: [
       { name: 'llm', version: '0.1.0' },
       { name: 'demo', version: '0.1.0' },
@@ -69,6 +72,7 @@ async function main() {
       { name: 'agent', version: '0.1.0' },
     ],
     staticRoot,
+    updateRoot,
   })
 
   await app.listen({ port: PORT, host: HOST })
@@ -76,6 +80,9 @@ async function main() {
   console.log(`[server] WebSocket endpoint: ws://localhost:${PORT}/ws`)
   if (staticRoot) {
     console.log(`[server] serving static files from: ${staticRoot}`)
+  }
+  if (updateRoot) {
+    console.log(`[server] serving update bundles from: ${updateRoot}`)
   }
 }
 
