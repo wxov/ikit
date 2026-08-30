@@ -4,6 +4,8 @@ WORKDIR /app
 COPY . .
 RUN corepack enable && pnpm install --frozen-lockfile
 RUN pnpm --filter @ikit/web build
+# 热更新：生成 dist/web-manifest.json + update/<version>/web-update-<version>.zip
+RUN node scripts/build-web-update.mjs
 
 # ---- 运行阶段 ----
 FROM node:24-alpine AS runner
@@ -15,6 +17,7 @@ RUN corepack enable && pnpm install --frozen-lockfile
 
 # 复制构建好的前端产物
 COPY --from=build /app/apps/web/dist ./apps/web/dist
+COPY --from=build /app/update ./update
 ENV WEB_DIST=/app/apps/web/dist
 ENV KB_STORAGE=sqlite
 
