@@ -3,6 +3,17 @@ import { existsSync, readFileSync } from 'node:fs'
 import { createCore } from '@ikit/core'
 import { createApi } from '@ikit/api'
 
+// 读取当前版本（来自 packages/server/package.json）
+let APP_VERSION = '0.1.3'
+try {
+  const pkg = JSON.parse(
+    readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf-8'),
+  ) as { version?: string }
+  if (pkg.version) APP_VERSION = pkg.version
+} catch {
+  /* ignore */
+}
+
 // 加载 .env（从当前目录向上查找，项目根的 .env 优先），已存在的环境变量优先
 function findEnvFile(): string | undefined {
   let dir = process.cwd()
@@ -64,7 +75,7 @@ async function main() {
 
   const app = await createApi(ctx, {
     name: 'i-kit',
-    version: '0.1.2',
+    version: APP_VERSION,
     plugins: [
       { name: 'llm', version: '0.1.0' },
       { name: 'demo', version: '0.1.0' },
