@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import type { Context } from 'cordis'
 import type { ChatMessage, KnowledgeEntryInput } from '@ikit/core'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 
 export interface ApiMeta {
   name?: string
@@ -8,6 +10,8 @@ export interface ApiMeta {
   plugins?: Array<{ name: string; version?: string }>
   /** 前端静态目录（生产模式托管 dist） */
   staticRoot?: string
+  /** 热更新分发包根目录（含 <version>/web-update.zip） */
+  updateRoot?: string
 }
 
 export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta = {}) {
@@ -16,6 +20,36 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     uptime: Math.round(process.uptime()),
     ts: Date.now(),
   }))
+
+  // 热更新：返回可用的 web 版本清单（来源：dist/web-manifest.json）
+  app.get('/api/update/manifest', async () => {
+    const currentVersion = meta.version ?? '0.1.0'
+    if (!meta.staticRoot) {
+      return { currentVersion, latest: currentVersion, hasUpdate: false, bundleUrl: null }
+    }
+    try {
+      const manifestPath = path.join(meta.staticRoot, 'web-manifest.json')
+      const raw = readFileSync(manifestPath, 'utf-8')
+      const m = JSON.parse(raw) as {
+        version?: string
+        buildTime?: string
+        bundle?: string
+      }
+      const latest = m.version || currentVersion
+      const hasUpdate = latest !== currentVersion
+      return {
+        currentVersion,
+        latest,
+        hasUpdate,
+        // 分发包托管在 /update/<version>/<bundle>
+        bundleUrl: hasUpdate && m.bundle ? `/update/${latest}/${m.bundle}` : null,
+        buildTime: m.buildTime ?? null,
+      }
+    } catch {
+      // 无 manifest（如开发模式）：视为已最新
+      return { currentVersion, latest: currentVersion, hasUpdate: false, bundleUrl: null }
+    }
+  })
 
   app.get('/api/system/info', async () => ({
     name: meta.name ?? 'i-kit',

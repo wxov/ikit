@@ -32,6 +32,15 @@ export async function createApi(ctx: Context, meta: ApiMeta = {}): Promise<Fasti
 
   registerRoutes(app, ctx, meta)
 
+  // 热更新分发包静态托管（/update/<version>/<bundle>）
+  if (meta.updateRoot) {
+    await app.register(fastifyStatic, {
+      root: meta.updateRoot,
+      prefix: '/update/',
+      decorateReply: false,
+    })
+  }
+
   // 静态托管（生产模式）：托管前端构建产物 dist，实现前后端同源
   if (meta.staticRoot) {
     await app.register(fastifyStatic, {

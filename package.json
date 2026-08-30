@@ -19,5 +19,8 @@
     "onlyBuiltDependencies": [
       "esbuild"
     ]
+  },
+  "devDependencies": {
+    "adm-zip": "^0.6.0"
   }
 }
