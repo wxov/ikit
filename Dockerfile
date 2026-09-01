@@ -12,6 +12,7 @@ FROM node:24-alpine AS runner
 WORKDIR /app
 
 COPY . .
+RUN corepack enable
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 COPY --from=build /app/update ./update
