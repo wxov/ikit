@@ -3,6 +3,7 @@ import Fuse from 'fuse.js'
 import type { Context } from 'cordis'
 import type {
   CategoryNode,
+  KnowledgeComment,
   KnowledgeDb,
   KnowledgeEntry,
   KnowledgeEntryInput,
@@ -18,8 +19,6 @@ const STOP_WORDS = new Set([
 ])
 
 export type EmbedFn = (texts: string[]) => Promise<number[][]>
-
-export type SummarizeFn = (text: string) => Promise<string>
 
 function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || !a.length) return 0
@@ -89,7 +88,6 @@ export function createKnowledgeService(
   ctx: Context,
   store: KnowledgeStore,
   embed?: EmbedFn,
-  summarize?: SummarizeFn,
 ): KnowledgeService {
   const fuse = new Fuse<KnowledgeEntry>([], {
     keys: ['title', 'content', 'tags'],
@@ -129,39 +127,6 @@ export function createKnowledgeService(
   }
 
   return {
-    async importMany(items) {
-      const db = await store.load()
-      ensureCategories(db)
-      const now = new Date().toISOString()
-      const entries: KnowledgeEntry[] = []
-      for (const input of items) {
-        if (!input.title?.trim()) continue
-        const category = input.category?.trim() ? normalizePath(input.category) : undefined
-        if (category) ensureCategory(db, category)
-        const entry: KnowledgeEntry = {
-          id: randomUUID(),
-          title: input.title.trim(),
-          content: input.content,
-          tags: input.tags ?? [],
-          category,
-          parentId: input.parentId || undefined,
-          sortOrder: db.entries.filter(
-            (e) => !e.deletedAt && (e.parentId || undefined) === (input.parentId || undefined),
-          ).length,
-          status: 'published',
-          createdAt: now,
-          updatedAt: now,
-        }
-        await vectorize(entry)
-        db.entries.push(entry)
-        entries.push(entry)
-      }
-      await store.save()
-      await refreshFuse()
-      for (const entry of entries) emitChange('create', entry)
-      return { created: entries.length, entries }
-    },
-
     async create(input) {
       const db = await store.load()
       ensureCategories(db)
@@ -179,6 +144,8 @@ export function createKnowledgeService(
           (e) => !e.deletedAt && (e.parentId || undefined) === (input.parentId || undefined),
         ).length,
         status: 'draft',
+        cover: input.cover || undefined,
+        views: 0,
         createdAt: now,
         updatedAt: now,
       }
@@ -198,11 +165,6 @@ export function createKnowledgeService(
         return active.slice(offset, offset + options.limit)
       }
       return active
-    },
-
-    async get(id) {
-      const db = await store.load()
-      return db.entries.find((e) => e.id === id)
     },
 
     async update(id, patch) {
@@ -241,6 +203,7 @@ export function createKnowledgeService(
         content: newContent,
         tags: patch.tags ?? prev.tags,
         category,
+        cover: patch.cover !== undefined ? patch.cover || undefined : prev.cover,
         updatedAt: new Date().toISOString(),
       }
       if (embed && (patch.title || patch.content)) {
@@ -299,21 +262,6 @@ export function createKnowledgeService(
       return { updated }
     },
 
-    async getChildren(parentId) {
-      const db = await store.load()
-      const pid = parentId || undefined
-      return db.entries
-        .filter((e) => !e.deletedAt && (e.parentId || undefined) === pid)
-        .sort((a, b) => {
-          // 置顶优先，然后 sortOrder（未排序的按更新时间兜底）
-          if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1
-          const ao = a.sortOrder ?? Number.MAX_SAFE_INTEGER
-          const bo = b.sortOrder ?? Number.MAX_SAFE_INTEGER
-          if (ao !== bo) return ao - bo
-          return b.updatedAt.localeCompare(a.updatedAt)
-        })
-    },
-
     async togglePin(id) {
       const db = await store.load()
       const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
@@ -326,92 +274,14 @@ export function createKnowledgeService(
       return entry
     },
 
-    async setStatus(id, status) {
+    async view(id) {
       const db = await store.load()
       const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
       if (!entry) return undefined
-      entry.status = status
-      entry.updatedAt = new Date().toISOString()
-      await store.save()
-      await refreshFuse()
-      emitChange('update', entry)
-      return entry
-    },
-
-    async restoreVersion(id, version) {
-      const db = await store.load()
-      const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
-      if (!entry) return undefined
-      const target = entry.history?.find((h) => h.version === version)
-      if (!target) return undefined
-      // 当前版本也存入历史
-      const history = entry.history ?? []
-      history.unshift({
-        version: (history[0]?.version ?? 0) + 1,
-        title: entry.title,
-        content: entry.content,
-        updatedAt: entry.updatedAt,
-      })
-      if (history.length > 20) history.length = 20
-      entry.history = history
-      // 恢复目标版本
-      entry.title = target.title
-      entry.content = target.content
-      entry.updatedAt = new Date().toISOString()
-      if (embed) await vectorize(entry)
-      await store.save()
-      await refreshFuse()
-      emitChange('update', entry)
-      return entry
-    },
-
-    async generateSummary(id) {
-      if (!summarize) return undefined
-      const db = await store.load()
-      const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
-      if (!entry) return undefined
-      const text = `标题：${entry.title}\n\n内容：${entry.content.slice(0, 3000)}`
-      const prompt = `请为下面这篇文章生成一段简洁的中文摘要（80字以内，直接输出摘要内容，不要任何其他说明或前缀）：\n\n${text}`
-      entry.summary = (await summarize(prompt)).trim()
-      await store.save()
-      await refreshFuse()
-      emitChange('update', entry)
-      return entry
-    },
-
-    async rate(id, rating) {
-      const db = await store.load()
-      const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
-      if (!entry) return undefined
-      entry.rating = Math.max(1, Math.min(5, Math.round(rating)))
+      entry.views = (entry.views ?? 0) + 1
       await store.save()
       emitChange('update', entry)
       return entry
-    },
-
-    async like(id) {
-      const db = await store.load()
-      const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
-      if (!entry) return undefined
-      entry.likes = (entry.likes ?? 0) + 1
-      await store.save()
-      emitChange('update', entry)
-      return entry
-    },
-
-    async generateShareLink(id) {
-      const db = await store.load()
-      const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
-      if (!entry) return undefined
-      entry.shareToken = entry.shareToken ?? randomUUID().replace(/-/g, '')
-      await store.save()
-      emitChange('update', entry)
-      return entry
-    },
-
-    async getByShareToken(token) {
-      const db = await store.load()
-      return db.entries.find((e) => e.shareToken === token && !e.deletedAt)
     },
 
     async listTrash() {
@@ -518,44 +388,6 @@ export function createKnowledgeService(
       return buildCategoryTree(db.categories, db.entries)
     },
 
-    async removeCategory(path) {
-      const db = await store.load()
-      ensureCategories(db)
-      const normalized = normalizePath(path)
-      db.categories = db.categories.filter(
-        (c) => c !== normalized && !c.startsWith(`${normalized}/`),
-      )
-      await store.save()
-      return buildCategoryTree(db.categories, db.entries)
-    },
-
-    async renameCategory(oldPath, newPath) {
-      const db = await store.load()
-      ensureCategories(db)
-      const old = normalizePath(oldPath)
-      const next = normalizePath(newPath)
-      if (!old || !next || old === next) {
-        return buildCategoryTree(db.categories, db.entries)
-      }
-      // 更新分类（含子分类前缀替换）并去重
-      db.categories = [...new Set(
-        db.categories.map((c) => {
-          if (c === old) return next
-          if (c.startsWith(`${old}/`)) return next + c.slice(old.length)
-          return c
-        }),
-      )]
-      // 更新条目的分类
-      for (const e of db.entries) {
-        if (e.category === old) e.category = next
-        else if (e.category?.startsWith(`${old}/`)) {
-          e.category = next + e.category.slice(old.length)
-        }
-      }
-      await store.save()
-      return buildCategoryTree(db.categories, db.entries)
-    },
-
     async bulkSetCategory(ids, category) {
       const db = await store.load()
       ensureCategories(db)
@@ -571,6 +403,55 @@ export function createKnowledgeService(
       }
       if (updated) await store.save()
       return { updated }
+    },
+
+    async listComments(entryId) {
+      const db = await store.load()
+      const comments = db.comments ?? []
+      return comments
+        .filter((c) => c.entryId === entryId)
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+    },
+
+    async addComment(entryId, input, author) {
+      const db = await store.load()
+      const entry = db.entries.find((e) => e.id === entryId && !e.deletedAt)
+      if (!entry) throw new Error('条目不存在')
+      const content = (input.content || '').trim()
+      if (!content) throw new Error('评论内容不能为空')
+      if (!db.comments) db.comments = []
+      const comment: KnowledgeComment = {
+        id: randomUUID(),
+        entryId,
+        author,
+        content,
+        parentId: input.parentId || undefined,
+        likes: 0,
+        createdAt: new Date().toISOString(),
+      }
+      db.comments.push(comment)
+      await store.save()
+      ctx.emit('knowledge:changed', { action: 'comment', entryId, comment })
+      return comment
+    },
+
+    async listAllComments() {
+      const db = await store.load()
+      return (db.comments ?? []).slice()
+    },
+
+    async removeComment(id, isAdmin, author) {
+      const db = await store.load()
+      const comments = db.comments ?? []
+      const idx = comments.findIndex((c) => c.id === id)
+      if (idx < 0) return false
+      const c = comments[idx]
+      if (!isAdmin && c.author !== author) throw new Error('无权删除该评论')
+      comments.splice(idx, 1)
+      db.comments = comments
+      await store.save()
+      ctx.emit('knowledge:changed', { action: 'comment-removed', id })
+      return true
     },
   }
 }

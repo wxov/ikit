@@ -6,7 +6,7 @@
 
 - **Docker 多阶段构建**：构建前端 dist + 打包运行时依赖
 - **docker-compose**：服务编排、数据卷持久化、`restart: unless-stopped` 崩溃自动重启、健康检查
-- **数据**：SQLite 数据库持久化到 Docker 数据卷（`ikit-data`）
+- **数据**：SQLite / JSON 数据 + **上传文件（`data/uploads`，封面图等）** 持久化到 Docker 数据卷（`ikit-data`）
 
 ## 前提条件
 

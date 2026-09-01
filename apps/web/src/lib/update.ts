@@ -21,10 +21,6 @@ export function detectPlatform(): Platform {
   return 'web'
 }
 
-// 当前 web 版本（构建时注入）
-export const CURRENT_WEB_VERSION: string =
-  (import.meta.env.VITE_APP_VERSION as string | undefined) ?? '0.1.2'
-
 export async function fetchUpdateManifest(): Promise<UpdateInfo | null> {
   try {
     const res = await fetch(apiUrl('/api/update/manifest'), { cache: 'no-store' })
@@ -39,13 +35,6 @@ export async function fetchUpdateManifest(): Promise<UpdateInfo | null> {
 export function hasUpdate(info: UpdateInfo | null): boolean {
   if (!info) return false
   return info.hasUpdate && info.latest !== info.currentVersion
-}
-
-// 下载更新包（统一入口）
-export async function downloadBundle(url: string): Promise<Blob> {
-  const res = await fetch(url, { cache: 'no-store' })
-  if (!res.ok) throw new Error(`下载失败 HTTP ${res.status}`)
-  return res.blob()
 }
 
 // 各平台应用更新
@@ -85,17 +74,4 @@ export async function applyUpdate(
     return { applied: true, platform, url }
   }
   return { applied: false, platform, url }
-}
-
-// 简短版本比较
-export function versionGt(a: string, b: string): boolean {
-  const pa = a.split('.').map(Number)
-  const pb = b.split('.').map(Number)
-  for (let i = 0; i < 3; i++) {
-    const x = pa[i] ?? 0
-    const y = pb[i] ?? 0
-    if (x > y) return true
-    if (x < y) return false
-  }
-  return false
 }

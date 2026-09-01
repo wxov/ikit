@@ -27,6 +27,8 @@ const props = defineProps<{
   movePickMode?: boolean
   // 是否隐藏展开箭头（选择模式）
   hideToggle?: boolean
+  // 站主模式：显示拖动排序与 ＋/⋯ 操作
+  admin?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -41,12 +43,6 @@ const emit = defineEmits<{
   (e: 'dragEnd'): void
   (e: 'pickMoveTarget', id: string): void
 }>()
-
-const STATUS_LABEL: Record<string, string> = {
-  draft: '草稿',
-  published: '已发布',
-  archived: '已归档',
-}
 
 function dropPos(e: MouseEvent): 'top' | 'middle' | 'bottom' {
   const el = e.currentTarget as HTMLElement
@@ -77,7 +73,7 @@ function onRowClick() {
         'move-target':
           !batchMode && movePickerFor && moveTargetParent === node.entry.id && !forbidden,
       }"
-      :draggable="!batchMode && !movePickMode"
+      :draggable="!!admin && !batchMode && !movePickMode"
       :style="{ paddingLeft: 8 + depth * 14 + 'px' }"
       @click="onRowClick"
       @dragstart="emit('dragStart', node.entry.id)"
@@ -86,7 +82,7 @@ function onRowClick() {
       @dragend="emit('dragEnd')"
     >
       <div class="doc-item-row">
-        <div v-if="batchMode" class="kb-check" :class="{ on: false }" @click.stop="emit('toggleSelect', node.entry.id)"></div>
+        <div v-if="batchMode" class="kb-check" @click.stop="emit('toggleSelect', node.entry.id)"></div>
         <span
           v-else-if="!hideToggle && node.children.length"
           class="doc-tree-arrow"
@@ -101,8 +97,8 @@ function onRowClick() {
             <span v-html="props.highlight(node.entry.title, searchQ)"></span>
           </div>
         </div>
-        <!-- hover 操作 -->
-        <div v-if="!batchMode && !movePickMode" class="doc-item-actions" @click.stop>
+        <!-- hover 操作（仅站主） -->
+        <div v-if="admin && !batchMode && !movePickMode" class="doc-item-actions" @click.stop>
           <button class="ia-btn" title="新建子文档" @click="emit('addChild', node.entry.id)">＋</button>
           <button class="ia-btn" title="更多操作" @click="emit('menu', menuFor === node.entry.id ? '' : node.entry.id)">⋯</button>
         </div>
@@ -137,6 +133,7 @@ function onRowClick() {
         :forbidden="forbidden"
         :move-pick-mode="movePickMode"
         :hide-toggle="hideToggle"
+        :admin="admin"
         @select="(id) => emit('select', id)"
         @toggle="(id) => emit('toggle', id)"
         @toggle-select="(id) => emit('toggleSelect', id)"

@@ -63,6 +63,27 @@ async function main() {
       dataDir: './data',
       storage: process.env.KB_STORAGE === 'sqlite' ? 'sqlite' : 'json',
     },
+    registry: {
+      dataDir: './data',
+      pluginDir: process.env.PLUGIN_DIR ?? path.resolve(process.cwd(), '../../plugins'),
+    },
+    account: {
+      dataDir: './data',
+      adminUsername: process.env.ADMIN_USERNAME ?? 'admin',
+      adminPassword: process.env.ADMIN_PASSWORD ?? 'admin123',
+      smtp: {
+        host: process.env.SMTP_HOST ?? '',
+        port: Number(process.env.SMTP_PORT ?? 587),
+        secure: process.env.SMTP_SECURE === '1',
+        user: process.env.SMTP_USER ?? '',
+        pass: process.env.SMTP_PASS ?? '',
+        from: process.env.SMTP_FROM ?? '',
+      },
+      appUrl: process.env.APP_URL ?? '',
+    },
+    storeData: {
+      dataDir: './data',
+    },
     llm: {
       apiBase: process.env.LLM_API_BASE ?? 'https://api.deepseek.com',
       apiKey: process.env.LLM_API_KEY ?? '',
@@ -77,13 +98,17 @@ async function main() {
     name: 'i-kit',
     version: APP_VERSION,
     plugins: [
-      { name: 'llm', version: '0.1.0' },
-      { name: 'demo', version: '0.1.0' },
-      { name: 'knowledge', version: '0.1.0' },
-      { name: 'agent', version: '0.1.0' },
+      { name: 'llm', version: APP_VERSION },
+      { name: 'demo', version: APP_VERSION },
+      { name: 'knowledge', version: APP_VERSION },
+      { name: 'agent', version: APP_VERSION },
+      { name: 'plugin-registry', version: APP_VERSION },
+      { name: 'account', version: APP_VERSION },
+      { name: 'store-data', version: APP_VERSION },
     ],
     staticRoot,
     updateRoot,
+    uploadsDir: path.resolve(process.cwd(), 'data', 'uploads'),
   })
 
   await app.listen({ port: PORT, host: HOST })

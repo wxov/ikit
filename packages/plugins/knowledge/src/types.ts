@@ -29,6 +29,10 @@ export interface KnowledgeEntry {
   rating?: number
   /** 点赞数 */
   likes?: number
+  /** 访问/浏览量 */
+  views?: number
+  /** 封面图 URL（可选；未设置时前端用正文首图或渐变兜底） */
+  cover?: string
   /** 外部分享令牌 */
   shareToken?: string
   /** 软删除标记（回收站） */
@@ -45,6 +49,7 @@ export interface KnowledgeEntryInput {
   tags?: string[]
   category?: string
   parentId?: string
+  cover?: string
 }
 
 export interface KnowledgeSearchResult {
@@ -56,6 +61,25 @@ export interface KnowledgeDb {
   entries: KnowledgeEntry[]
   /** 分类路径列表（树状层级用 "/" 分隔） */
   categories: string[]
+  /** 评论列表（可选，兼容旧库） */
+  comments?: KnowledgeComment[]
+}
+
+/** 文章评论 */
+export interface KnowledgeComment {
+  id: string
+  entryId: string
+  author: string
+  content: string
+  /** 回复哪条评论（可选，用于楼中楼） */
+  parentId?: string
+  likes?: number
+  createdAt: string
+}
+
+export interface CommentInput {
+  content: string
+  parentId?: string
 }
 
 /** 分类树节点 */
@@ -68,22 +92,13 @@ export interface CategoryNode {
 
 export interface KnowledgeService {
   create(input: KnowledgeEntryInput): Promise<KnowledgeEntry>
-  importMany(items: KnowledgeEntryInput[]): Promise<{ created: number; entries: KnowledgeEntry[] }>
   list(options?: { limit?: number; offset?: number }): Promise<KnowledgeEntry[]>
-  get(id: string): Promise<KnowledgeEntry | undefined>
   update(id: string, patch: Partial<KnowledgeEntryInput>): Promise<KnowledgeEntry | undefined>
   moveDoc(id: string, parentId: string | undefined | null): Promise<KnowledgeEntry | undefined>
   reorder(parentId: string | undefined | null, orderedIds: string[]): Promise<{ updated: number }>
-  getChildren(parentId: string | undefined): Promise<KnowledgeEntry[]>
   remove(id: string): Promise<boolean>
   togglePin(id: string): Promise<KnowledgeEntry | undefined>
-  setStatus(id: string, status: 'draft' | 'published' | 'archived'): Promise<KnowledgeEntry | undefined>
-  restoreVersion(id: string, version: number): Promise<KnowledgeEntry | undefined>
-  generateSummary(id: string): Promise<KnowledgeEntry | undefined>
-  rate(id: string, rating: number): Promise<KnowledgeEntry | undefined>
-  like(id: string): Promise<KnowledgeEntry | undefined>
-  generateShareLink(id: string): Promise<KnowledgeEntry | undefined>
-  getByShareToken(token: string): Promise<KnowledgeEntry | undefined>
+  view(id: string): Promise<KnowledgeEntry | undefined>
   listTrash(): Promise<KnowledgeEntry[]>
   restore(id: string): Promise<boolean>
   purge(id: string): Promise<boolean>
@@ -92,7 +107,9 @@ export interface KnowledgeService {
   count(): Promise<number>
   getCategories(): Promise<CategoryNode[]>
   addCategory(path: string): Promise<CategoryNode[]>
-  removeCategory(path: string): Promise<CategoryNode[]>
-  renameCategory(oldPath: string, newPath: string): Promise<CategoryNode[]>
   bulkSetCategory(ids: string[], category: string | undefined): Promise<{ updated: number }>
+  listComments(entryId: string): Promise<KnowledgeComment[]>
+  addComment(entryId: string, input: CommentInput, author: string): Promise<KnowledgeComment>
+  removeComment(id: string, isAdmin: boolean, author: string): Promise<boolean>
+  listAllComments(): Promise<KnowledgeComment[]>
 }

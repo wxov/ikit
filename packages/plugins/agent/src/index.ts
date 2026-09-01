@@ -2,7 +2,7 @@ import { Schema } from 'cordis'
 import type { Context } from 'cordis'
 import type { ChatMessage, LlmService, LlmToolDefinition } from '@ikit/plugin-llm'
 import type { KnowledgeService } from '@ikit/plugin-knowledge'
-import type { AgentRunResult, AgentService, AgentStep, AgentStreamEvent, AgentTool } from './types.js'
+import type { AgentService, AgentStreamEvent, AgentTool } from './types.js'
 
 export const name = 'agent'
 export const inject = ['llm', 'knowledge']
@@ -79,62 +79,6 @@ export function apply(_ctx: Context, config: Config) {
     }))
   }
 
-  async function run(userMessage: string, history: ChatMessage[] = []): Promise<AgentRunResult> {
-    const messages: ChatMessage[] = [
-      { role: 'system', content: config.systemPrompt ?? '' },
-      ...history,
-      { role: 'user', content: userMessage },
-    ]
-    const steps: AgentStep[] = []
-    const maxSteps = config.maxSteps ?? 10
-
-    for (let i = 0; i < maxSteps; i++) {
-      const resp = await ctx.llm.chat(messages, { tools: toLlmTools() })
-      const msg = resp.message
-      messages.push(msg)
-
-      const toolCalls = msg.tool_calls ?? []
-      if (!toolCalls.length) {
-        const answer = msg.content ?? ''
-        steps.push({ type: 'final', answer })
-        return { answer, steps }
-      }
-
-      for (const call of toolCalls) {
-        const toolName = call.function.name
-        const tool = tools.get(toolName)
-        let toolArgs: Record<string, unknown> = {}
-        try {
-          toolArgs = JSON.parse(call.function.arguments || '{}')
-        } catch {
-          toolArgs = {}
-        }
-
-        let toolResult: string
-        if (!tool) {
-          toolResult = `错误：未知工具 ${toolName}`
-        } else {
-          try {
-            toolResult = String(await tool.handler(toolArgs))
-          } catch (e) {
-            toolResult = `工具执行出错：${e instanceof Error ? e.message : String(e)}`
-          }
-        }
-
-        steps.push({ type: 'tool', toolName, toolArgs, toolResult })
-        messages.push({
-          role: 'tool',
-          tool_call_id: call.id,
-          content: toolResult,
-        })
-      }
-    }
-
-    const answer = '已达到最大工具调用步数，未能完成回答。'
-    steps.push({ type: 'final', answer })
-    return { answer, steps }
-  }
-
   async function* runStream(
     userMessage: string,
     history: ChatMessage[] = [],
@@ -202,9 +146,6 @@ export function apply(_ctx: Context, config: Config) {
 
   const service: AgentService = {
     registerTool,
-    unregisterTool(name) {
-      tools.delete(name)
-    },
     listTools() {
       return [...tools.values()].map(({ name, description, parameters }) => ({
         name,
@@ -212,7 +153,6 @@ export function apply(_ctx: Context, config: Config) {
         parameters,
       }))
     },
-    run,
     runStream,
   }
 

@@ -33,8 +33,6 @@ export type AgentStreamEvent =
 
 export interface AgentService {
   registerTool(tool: AgentTool): () => void
-  unregisterTool(name: string): void
   listTools(): AgentToolInfo[]
-  run(userMessage: string, history?: ChatMessage[]): Promise<AgentRunResult>
   runStream(userMessage: string, history?: ChatMessage[]): AsyncIterable<AgentStreamEvent>
 }

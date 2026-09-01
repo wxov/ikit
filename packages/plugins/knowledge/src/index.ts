@@ -5,13 +5,16 @@ import type { Context } from 'cordis'
 import type { LlmService } from '@ikit/plugin-llm'
 import type { KnowledgeDb, KnowledgeEntry } from './types.js'
 import { JsonStore, SqliteStore, type KnowledgeStore } from './store.js'
-import { createKnowledgeService, type EmbedFn, type SummarizeFn } from './service.js'
+import { createKnowledgeService, type EmbedFn } from './service.js'
 
 declare module 'cordis' {
   interface Events<C extends Context = Context> {
     'knowledge:changed'(payload: {
-      action: 'create' | 'update' | 'remove'
-      entry: KnowledgeEntry
+      action: 'create' | 'update' | 'remove' | 'comment' | 'comment-removed'
+      entry?: KnowledgeEntry
+      entryId?: string
+      comment?: unknown
+      id?: string
     }): void
   }
 }
@@ -45,12 +48,6 @@ export function apply(ctx: Context, config: Config) {
   const embed: EmbedFn | undefined = llm?.embeddingEnabled
     ? (texts) => llm.embed(texts)
     : undefined
-  const summarize: SummarizeFn | undefined = llm?.configured
-    ? async (text) => {
-        const resp = await llm.chat([{ role: 'user', content: text }])
-        return resp.message.content ?? ''
-      }
-    : undefined
 
   const jsonFile = path.resolve(dataDir, filename)
   let store: KnowledgeStore
@@ -64,11 +61,11 @@ export function apply(ctx: Context, config: Config) {
     store = sqlite
     storageLabel = `sqlite:${dbFile}`
   } else {
-    store = new JsonStore(jsonFile, { entries: [], categories: [] })
+    store = new JsonStore(jsonFile, { entries: [], categories: [], comments: [] })
     storageLabel = `json:${jsonFile}`
   }
 
-  const service = createKnowledgeService(ctx, store, embed, summarize)
+  const service = createKnowledgeService(ctx, store, embed)
 
   ctx.set('knowledge', service)
   ctx.on('dispose', () => {
@@ -88,7 +85,11 @@ function migrateFromJson(sqlite: SqliteStore, jsonFile: string) {
     const raw = readFileSync(jsonFile, 'utf-8')
     const data = JSON.parse(raw) as KnowledgeDb
     if (!data.entries?.length && !data.categories?.length) return
-    sqlite.importData({ entries: data.entries ?? [], categories: data.categories ?? [] })
+    sqlite.importData({
+      entries: data.entries ?? [],
+      categories: data.categories ?? [],
+      comments: data.comments ?? [],
+    })
     console.log(`[knowledge] 已从 JSON 迁移 ${data.entries?.length ?? 0} 条到 SQLite`)
   } catch (e: any) {
     if (e?.code !== 'ENOENT') {

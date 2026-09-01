@@ -41,6 +41,15 @@ export async function createApi(ctx: Context, meta: ApiMeta = {}): Promise<Fasti
     })
   }
 
+  // 上传文件静态托管（/uploads/<file>）
+  if (meta.uploadsDir) {
+    await app.register(fastifyStatic, {
+      root: meta.uploadsDir,
+      prefix: '/uploads/',
+      decorateReply: false,
+    })
+  }
+
   // 静态托管（生产模式）：托管前端构建产物 dist，实现前后端同源
   if (meta.staticRoot) {
     await app.register(fastifyStatic, {

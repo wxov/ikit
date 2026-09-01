@@ -21,6 +21,8 @@ export interface KnowledgeEntry {
   summary?: string
   rating?: number
   likes?: number
+  views?: number
+  cover?: string
   shareToken?: string
   createdAt: string
   updatedAt: string
@@ -33,6 +35,16 @@ export interface CategoryNode {
   children: CategoryNode[]
 }
 
+export interface KnowledgeComment {
+  id: string
+  entryId: string
+  author: string
+  content: string
+  parentId?: string
+  likes?: number
+  createdAt: string
+}
+
 export interface WsMessage {
   type: string
   payload?: any
@@ -42,9 +54,14 @@ export interface WsMessage {
 export type EventItem = WsMessage
 
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
+  const hasBody = options?.body != null
   const res = await fetch(apiUrl(path), {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers: {
+      // 仅在有 body 时才带 Content-Type，避免空 body 请求被 Fastify 拒绝
+      ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+      ...(options?.headers ?? {}),
+    },
   })
   if (!res.ok) {
     const text = await res.text()

@@ -97,6 +97,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@ikit/plugin-account':
+        specifier: workspace:*
+        version: link:../plugins/account
       '@ikit/plugin-agent':
         specifier: workspace:*
         version: link:../plugins/agent
@@ -109,6 +112,25 @@ importers:
       '@ikit/plugin-llm':
         specifier: workspace:*
         version: link:../plugins/llm
+      '@ikit/plugin-registry':
+        specifier: workspace:*
+        version: link:../plugins/plugin-registry
+      '@ikit/plugin-store-data':
+        specifier: workspace:*
+        version: link:../plugins/store-data
+      cordis:
+        specifier: ^3.18.1
+        version: 3.18.1
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/plugins/account:
+    dependencies:
       cordis:
         specifier: ^3.18.1
         version: 3.18.1
@@ -172,6 +194,32 @@ importers:
         version: 5.9.3
 
   packages/plugins/llm:
+    dependencies:
+      cordis:
+        specifier: ^3.18.1
+        version: 3.18.1
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/plugins/plugin-registry:
+    dependencies:
+      cordis:
+        specifier: ^3.18.1
+        version: 3.18.1
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/plugins/store-data:
     dependencies:
       cordis:
         specifier: ^3.18.1

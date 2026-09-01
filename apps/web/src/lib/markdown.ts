@@ -57,12 +57,6 @@ hljs.registerAliases(['yml'], { languageName: 'yaml' })
 hljs.registerAliases(['html', 'svg'], { languageName: 'xml' })
 hljs.registerAliases(['md'], { languageName: 'markdown' })
 
-export interface TocItem {
-  level: number
-  text: string
-  id: string
-}
-
 const md = new MarkdownIt({
   html: false,
   linkify: true,
@@ -84,8 +78,8 @@ const md = new MarkdownIt({
 // 数学公式（KaTeX）：支持 $行内$ 和 $$块级$$
 md.use(markdownItKatex)
 
-// 渲染时收集标题，用于生成目录（TOC）
-let headings: TocItem[] = []
+// 渲染时为标题生成锚点 id（供页面内跳转/样式挂钩）
+let headingSeq = 0
 
 function extractText(inlineToken: any): string {
   return (
@@ -96,18 +90,18 @@ function extractText(inlineToken: any): string {
   )
 }
 
-// 自定义标题渲染：为每个标题生成 id，并记录到 TOC
+// 自定义标题渲染：为每个标题生成 id
 md.renderer.rules.heading_open = (tokens, idx, options, env, self) => {
   const level = Number(tokens[idx].tag.slice(1))
   const text = extractText(tokens[idx + 1])
-  const id = `heading-${headings.length}`
-  headings.push({ level, text, id })
-  tokens[idx].attrSet('id', id)
+  tokens[idx].attrSet('id', `heading-${headingSeq++}`)
+  void level
+  void text
   return self.renderToken(tokens, idx, options)
 }
 
-export function renderMarkdown(content: string): { html: string; toc: TocItem[] } {
-  headings = []
+export function renderMarkdown(content: string): { html: string } {
+  headingSeq = 0
   const html = md.render(content || '')
-  return { html, toc: [...headings] }
+  return { html }
 }
