@@ -28,8 +28,8 @@ jdk21/
 # TypeScript build info
 *.tsbuildinfo
 
-# 热更新分发包（构建产物）
+# 鐑洿鏂板垎鍙戝寘锛堟瀯寤轰骇鐗╋級
 update/
 
-# 第三方插件包（运行时加载）
-plugins/
+# 绗笁鏂规彃浠跺寘锛堣繍琛屾椂鍔犺浇锛?
+/plugins/
