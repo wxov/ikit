@@ -3,7 +3,7 @@ import type { CapacitorConfig } from '@capacitor/cli'
 // Capacitor 移动端配置
 // 复用同一套 Vue 前端，构建产物（dist）打包进原生 App
 const config: CapacitorConfig = {
-  appId: 'com.ikit.app',
+  appId: 'io.ikit.app',
   appName: 'i-kit',
   webDir: 'dist',
   server: {

@@ -1,4 +1,4 @@
-package com.ikit.app;
+package io.ikit.app;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
