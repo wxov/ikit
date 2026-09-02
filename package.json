@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.33.2",
-  "description": "閺堝搫娅掓禍?+ Web 閺堝秴濮?+ AI Agent 閹存劕顨滄い鍦窗閿涘苯鐔€娴?Cordis 閹绘帊娆㈤弸鑸电€?,
+  "description": "机器人 + Web 服务 + AI Agent 成套项目，基于自研 Cordis 插件架构；知识库、AI Agent、插件商店，三端同源。",
   "scripts": {
     "dev": "pnpm --filter @ikit/server dev",
     "dev:web": "pnpm --filter @ikit/web dev",
