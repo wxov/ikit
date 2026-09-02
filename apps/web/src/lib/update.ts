@@ -11,6 +11,10 @@ export interface UpdateInfo {
   buildTime: string | null
 }
 
+// 构建时注入的应用版本（vite define）
+declare const __APP_VERSION__: string
+export const APP_VERSION: string = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'
+
 // 检测当前运行平台
 export function detectPlatform(): Platform {
   // Tauri 2：window.__TAURI_INTERNALS__
@@ -23,7 +27,7 @@ export function detectPlatform(): Platform {
 
 export async function fetchUpdateManifest(): Promise<UpdateInfo | null> {
   try {
-    const res = await fetch(apiUrl('/api/update/manifest'), { cache: 'no-store' })
+    const res = await fetch(apiUrl(`/api/update/manifest?client=${APP_VERSION}`), { cache: 'no-store' })
     if (!res.ok) return null
     return (await res.json()) as UpdateInfo
   } catch {

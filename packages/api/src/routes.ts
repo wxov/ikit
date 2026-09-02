@@ -25,10 +25,11 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   }))
 
   // 热更新：返回可用的 web 版本清单（来源：dist/web-manifest.json）
-  app.get('/api/update/manifest', async () => {
-    const currentVersion = meta.version ?? '0.1.0'
+  // 客户端应传 ?client=<自身版本> 以便精确判断；未上报时视为旧版（提示更新），用于已发布旧包的热更新发现
+  app.get('/api/update/manifest', async (req) => {
+    const serverVersion = meta.version ?? '0.1.0'
     if (!meta.staticRoot) {
-      return { currentVersion, latest: currentVersion, hasUpdate: false, bundleUrl: null }
+      return { currentVersion: serverVersion, latest: serverVersion, hasUpdate: false, bundleUrl: null }
     }
     try {
       const manifestPath = path.join(meta.staticRoot, 'web-manifest.json')
@@ -38,10 +39,12 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
         buildTime?: string
         bundle?: string
       }
-      const latest = m.version || currentVersion
-      const hasUpdate = latest !== currentVersion
+      const latest = m.version || serverVersion
+      const client = String((req.query as { client?: string }).client ?? '').trim()
+      const effectiveCurrent = client || '0.0.0' // 未上报：视为旧版
+      const hasUpdate = latest !== effectiveCurrent
       return {
-        currentVersion,
+        currentVersion: client ? effectiveCurrent : serverVersion,
         latest,
         hasUpdate,
         // 分发包托管在 /update/<version>/<bundle>
@@ -50,7 +53,7 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
       }
     } catch {
       // 无 manifest（如开发模式）：视为已最新
-      return { currentVersion, latest: currentVersion, hasUpdate: false, bundleUrl: null }
+      return { currentVersion: serverVersion, latest: serverVersion, hasUpdate: false, bundleUrl: null }
     }
   })
 

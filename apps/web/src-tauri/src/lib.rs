@@ -112,8 +112,8 @@ fn sanitize(base: &Path, name: &str) -> PathBuf {
 
 /// 返回当前生效 web 版本（前端启动时调用决定加载哪个资源）
 #[tauri::command]
-fn get_current_version() -> String {
-    CURRENT_FALLBACK.to_string()
+fn get_current_version(app: AppHandle) -> String {
+    current_version(&app)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
