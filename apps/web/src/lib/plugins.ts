@@ -4,12 +4,6 @@ import { authHeaders } from './auth'
 
 export type PluginRole = 'guest' | 'user' | 'admin'
 
-export interface PluginVisibility {
-  guest: boolean
-  user: boolean
-  admin: boolean
-}
-
 export interface PluginRecord {
   name: string
   title: string
@@ -17,12 +11,13 @@ export interface PluginRecord {
   enabled: boolean
   builtin: boolean
   order: number
-  visibility: PluginVisibility
+  visibleGroups: string[]
   panel?: string
 }
 
 export interface VisiblePlugins {
   role: PluginRole
+  groups?: string[]
   plugins: PluginRecord[]
 }
 
@@ -46,15 +41,11 @@ export function setPluginOrder(ordered: string[]): Promise<{ plugins: PluginReco
   })
 }
 
-export function setPluginVisibility(
-  name: string,
-  role: PluginRole,
-  visible: boolean,
-): Promise<{ plugins: PluginRecord[] }> {
+export function setPluginGroups(name: string, groups: string[]): Promise<{ plugins: PluginRecord[] }> {
   return api(`/api/plugins/${name}/visibility`, {
     method: 'POST',
     headers: authHeaders(),
-    body: JSON.stringify({ role, visible }),
+    body: JSON.stringify({ groups }),
   })
 }
 

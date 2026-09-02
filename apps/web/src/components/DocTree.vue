@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, inject, type Ref } from 'vue'
 import { api, type KnowledgeEntry } from '../lib/api'
-import { authHeaders } from '../lib/auth'
+import { authHeaders, listGroups, type Group } from '../lib/auth'
 import DocTreeItem, { type DocNode } from './DocTreeItem.vue'
+import EntryPermissionDialog from './EntryPermissionDialog.vue'
 
 const emit = defineEmits<{
   (e: 'open', entry: KnowledgeEntry): void
@@ -31,6 +32,10 @@ const overPos = ref<'top' | 'middle' | 'bottom'>('middle')
 const moveFor = ref('')
 const movePickMode = ref(false)
 const moveTargetParent = ref<string | ''>('')
+
+// 权限设置
+const permEntry = ref<KnowledgeEntry | null>(null)
+const groups = ref<Group[]>([])
 
 function sortList(list: KnowledgeEntry[]): KnowledgeEntry[] {
   return [...list].sort(
@@ -117,6 +122,15 @@ async function onTogglePin(e: KnowledgeEntry) {
   await api(`/api/knowledge/entries/${e.id}/toggle-pin`, { method: 'POST', headers: authHeaders() })
   setNotice(e.pinned ? `已取消置顶「${e.title}」` : `已置顶「${e.title}」`)
   await load()
+}
+function onPermission(e: KnowledgeEntry) {
+  menuFor.value = ''
+  permEntry.value = e
+}
+function onPermSaved() {
+  permEntry.value = null
+  setNotice('权限已更新')
+  load()
 }
 async function onDelete(e: KnowledgeEntry) {
   menuFor.value = ''
@@ -260,7 +274,12 @@ async function onDrop(targetId: string, pos: 'top' | 'middle' | 'bottom') {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  listGroups()
+    .then((r) => (groups.value = r.groups))
+    .catch(() => {})
+})
 </script>
 
 <template>
@@ -317,10 +336,19 @@ onMounted(load)
           <div class="doc-menu-item" @click="onTogglePin(entries.find((e) => e.id === id)!)">
             {{ entries.find((e) => e.id === id)?.pinned ? '📌 取消置顶' : '📌 置顶' }}
           </div>
+          <div class="doc-menu-item" @click="onPermission(entries.find((e) => e.id === id)!)">🔒 权限设置</div>
           <div class="doc-menu-item danger" @click="onDelete(entries.find((e) => e.id === id)!)">🗑 删除</div>
         </template>
       </DocTreeItem>
     </div>
+
+    <EntryPermissionDialog
+      v-if="permEntry"
+      :entry="permEntry"
+      :groups="groups"
+      @saved="onPermSaved"
+      @close="permEntry = null"
+    />
   </div>
 </template>
 

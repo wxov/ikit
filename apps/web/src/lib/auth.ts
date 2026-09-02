@@ -5,7 +5,17 @@ export interface PublicUser {
   id: string
   username: string
   role: 'user' | 'admin'
+  groupIds?: string[]
   disabled: boolean
+  createdAt: string
+}
+
+export interface Group {
+  id: string
+  name: string
+  builtin: boolean
+  description?: string
+  parentId?: string
   createdAt: string
 }
 
@@ -62,4 +72,25 @@ export function deleteUser(id: string): Promise<{ users: PublicUser[] }> {
 }
 export function setUserRole(id: string, role: 'user' | 'admin'): Promise<{ users: PublicUser[] }> {
   return api(`/api/auth/users/${id}/role`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ role }) })
+}
+
+export function setUserGroups(id: string, groupIds: string[]): Promise<{ users: PublicUser[] }> {
+  return api(`/api/auth/users/${id}/groups`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ groupIds }) })
+}
+
+// ---- 用户组管理 ----
+export function listGroups(): Promise<{ groups: Group[] }> {
+  return api('/api/groups', { headers: authHeaders() })
+}
+export function createGroup(name: string, description?: string, parentId?: string): Promise<{ groups: Group[] }> {
+  return api('/api/groups', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ name, description, parentId }) })
+}
+export function renameGroup(id: string, name: string): Promise<{ groups: Group[] }> {
+  return api(`/api/groups/${id}`, { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ name }) })
+}
+export function deleteGroup(id: string): Promise<{ groups: Group[] }> {
+  return api(`/api/groups/${id}`, { method: 'DELETE', headers: authHeaders() })
+}
+export function setGroupParent(id: string, parentId: string | null): Promise<{ groups: Group[] }> {
+  return api(`/api/groups/${id}/parent`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ parentId }) })
 }

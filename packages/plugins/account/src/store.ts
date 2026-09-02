@@ -20,6 +20,7 @@ export class JsonAccountStore implements AccountStore {
       this.cache = {
         users: Array.isArray(parsed.users) ? parsed.users : [],
         sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
+        groups: Array.isArray(parsed.groups) ? parsed.groups : undefined,
       }
     } catch {
       this.cache = { users: [], sessions: [] }

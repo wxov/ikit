@@ -14,7 +14,7 @@
     'Microsoft YaHei', sans-serif;
 }
 
-/* 暗色模式（参考 参考站：中性近黑底 + 深灰面板 + 蓝色强调） */
+/* 暗色模式（中性近黑底 + 深灰面板 + 蓝色强调） */
 [data-theme='dark'] {
   --bg: #151515;
   --panel: #1f1f1f;

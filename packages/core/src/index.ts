@@ -15,10 +15,13 @@ import type { Config as AccountConfig } from '@ikit/plugin-account'
 import type { Config as StoreDataConfig } from '@ikit/plugin-store-data'
 import type { DemoService } from '@ikit/plugin-demo'
 import type {
+  EntryVisibility,
   KnowledgeEntry,
   KnowledgeEntryInput,
   KnowledgeSearchResult,
   KnowledgeService,
+  Viewer,
+  VisibilitySyncMode,
 } from '@ikit/plugin-knowledge'
 import type { ChatMessage, LlmService } from '@ikit/plugin-llm'
 import type {
@@ -70,4 +73,7 @@ export async function createCore(options: CoreOptions = {}) {
 export type {
   ChatMessage,
   KnowledgeEntryInput,
+  EntryVisibility,
+  Viewer,
+  VisibilitySyncMode,
 }

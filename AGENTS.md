@@ -139,6 +139,14 @@ export default { name, inject, apply, Config }
 ## 数据模型
 
 知识库条目（`KnowledgeEntry`）：
-- `id` / `title` / `content` / `tags[]` / `category?` / `pinned?` / `deletedAt?` / `embedding?`
+- `id` / `title` / `content` / `tags[]` / `category?` / `parentId?` / `pinned?` / `deletedAt?` / `embedding?`
+- 可见性：`visibility?`（`public` / `login` / `groups` / `private`，缺省 = `public`）+ `visibleGroups?`（`groups` 时生效）
 - 分类用路径字符串（`技术/前端`），`/` 分隔层级
 - 软删除用 `deletedAt`，回收站可恢复
+
+权限体系（用户组 + 内容可见性）：
+- 用户组 `Group`：内置 `guest` / `user` / `admin`（默认存在、不可删）+ 自定义组
+- 组包含关系：`Group.parentId`（上级组包含下级组，仅自定义组可设）；用户有效组 = 直接所属组 + 递归被包含的子组
+- 用户 `User.groupIds`：可多组归属，权限取并集；注册用户恒保留 `user` 组；`admin` 恒有全部权限
+- 插件 `PluginRecord.visibleGroups`：按用户组可见（替代原 `visibility` 布尔）
+- 文章可见性判定：`admin` 恒可见；`public` 全员、`login` 登录、`groups` 指定组、`private` 仅站主

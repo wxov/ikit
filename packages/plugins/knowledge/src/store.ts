@@ -64,7 +64,9 @@ export class SqliteStore implements KnowledgeStore {
         status TEXT,
         summary TEXT,
         history TEXT,
-        share_token TEXT
+        share_token TEXT,
+        visibility TEXT,
+        visible_groups TEXT
       );
       CREATE TABLE IF NOT EXISTS categories (
         path TEXT PRIMARY KEY
@@ -96,6 +98,8 @@ export class SqliteStore implements KnowledgeStore {
     addCol('summary', 'TEXT')
     addCol('history', 'TEXT')
     addCol('share_token', 'TEXT')
+    addCol('visibility', 'TEXT')
+    addCol('visible_groups', 'TEXT')
   }
 
   async load(): Promise<KnowledgeDb> {
@@ -122,6 +126,8 @@ export class SqliteStore implements KnowledgeStore {
       summary: r.summary ?? undefined,
       history: r.history ? JSON.parse(r.history) : undefined,
       shareToken: r.share_token ?? undefined,
+      visibility: (r.visibility as KnowledgeEntry['visibility']) || undefined,
+      visibleGroups: r.visible_groups ? JSON.parse(r.visible_groups) : undefined,
     }))
     const cats = this.db.prepare('SELECT path FROM categories').all() as any[]
     const cmts = this.db.prepare('SELECT * FROM comments').all() as any[]
@@ -154,8 +160,8 @@ export class SqliteStore implements KnowledgeStore {
       this.db.exec('DELETE FROM categories')
       this.db.exec('DELETE FROM comments')
       const ins = this.db.prepare(`
-        INSERT INTO entries (id, title, content, tags, category, parent_id, sort_order, pinned, created_at, updated_at, deleted_at, embedding, cover, views, rating, likes, status, summary, history, share_token)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO entries (id, title, content, tags, category, parent_id, sort_order, pinned, created_at, updated_at, deleted_at, embedding, cover, views, rating, likes, status, summary, history, share_token, visibility, visible_groups)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       for (const e of data.entries) {
         ins.run(
@@ -179,6 +185,8 @@ export class SqliteStore implements KnowledgeStore {
           e.summary ?? null,
           e.history ? JSON.stringify(e.history) : null,
           e.shareToken ?? null,
+          e.visibility ?? null,
+          e.visibleGroups ? JSON.stringify(e.visibleGroups) : null,
         )
       }
       const insCat = this.db.prepare('INSERT INTO categories (path) VALUES (?)')

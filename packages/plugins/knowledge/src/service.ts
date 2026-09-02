@@ -3,12 +3,15 @@ import Fuse from 'fuse.js'
 import type { Context } from 'cordis'
 import type {
   CategoryNode,
+  EntryVisibility,
   KnowledgeComment,
   KnowledgeDb,
   KnowledgeEntry,
   KnowledgeEntryInput,
   KnowledgeSearchResult,
   KnowledgeService,
+  Viewer,
+  VisibilitySyncMode,
 } from './types.js'
 import type { KnowledgeStore } from './store.js'
 
@@ -36,6 +39,37 @@ function cosineSimilarity(a: number[], b: number[]): number {
 
 function normalizePath(path: string): string {
   return path.trim().split('/').filter(Boolean).join('/')
+}
+
+// 可见性判定：admin 恒可见；否则按 visibility 级别判断
+function isVisible(entry: KnowledgeEntry, viewer: Viewer): boolean {
+  if (viewer.isAdmin) return true
+  const v = entry.visibility ?? 'public'
+  if (v === 'public') return true
+  if (v === 'private') return false
+  if (v === 'login') return !viewer.groups.includes('guest')
+  if (v === 'groups') return (entry.visibleGroups ?? []).some((g) => viewer.groups.includes(g))
+  return false
+}
+
+function arraysEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  const sa = [...a].sort()
+  const sb = [...b].sort()
+  return sa.every((v, i) => v === sb[i])
+}
+
+// 收集某文档的全部后代（不含自身，递归、广度优先）
+function collectDescendants(db: KnowledgeDb, rootId: string): KnowledgeEntry[] {
+  const out: KnowledgeEntry[] = []
+  const queue = db.entries.filter((e) => e.parentId === rootId && !e.deletedAt)
+  while (queue.length) {
+    const cur = queue.shift()!
+    out.push(cur)
+    const children = db.entries.filter((e) => e.parentId === cur.id && !e.deletedAt)
+    queue.push(...children)
+  }
+  return out
 }
 
 // 把分类路径（含父级）加入分类列表
@@ -133,6 +167,16 @@ export function createKnowledgeService(
       const now = new Date().toISOString()
       const category = input.category?.trim() ? normalizePath(input.category) : undefined
       if (category) ensureCategory(db, category)
+      // 可见性：显式指定优先；否则继承父文档（默认公开）
+      let visibility: EntryVisibility | undefined = input.visibility
+      let visibleGroups = input.visibleGroups
+      if (!visibility && input.parentId) {
+        const parent = db.entries.find((e) => e.id === input.parentId && !e.deletedAt)
+        if (parent) {
+          visibility = parent.visibility
+          visibleGroups = parent.visibleGroups
+        }
+      }
       const entry: KnowledgeEntry = {
         id: randomUUID(),
         title: input.title.trim(),
@@ -145,6 +189,8 @@ export function createKnowledgeService(
         ).length,
         status: 'draft',
         cover: input.cover || undefined,
+        visibility: visibility && visibility !== 'public' ? visibility : undefined,
+        visibleGroups: visibility === 'groups' ? visibleGroups : undefined,
         views: 0,
         createdAt: now,
         updatedAt: now,
@@ -157,9 +203,10 @@ export function createKnowledgeService(
       return entry
     },
 
-    async list(options) {
+    async list(options, viewer) {
       const db = await store.load()
-      const active = db.entries.filter((e) => !e.deletedAt)
+      let active = db.entries.filter((e) => !e.deletedAt)
+      if (viewer) active = active.filter((e) => isVisible(e, viewer))
       if (options?.limit != null) {
         const offset = options.offset ?? 0
         return active.slice(offset, offset + options.limit)
@@ -184,6 +231,14 @@ export function createKnowledgeService(
       const newTitle = patch.title?.trim() ?? prev.title
       const newContent = patch.content ?? prev.content
 
+      // 可见性：显式传入才变更；'public' 归一化为未设置
+      let visibility = prev.visibility
+      let visibleGroups = prev.visibleGroups
+      if (patch.visibility !== undefined) {
+        visibility = patch.visibility && patch.visibility !== 'public' ? patch.visibility : undefined
+        visibleGroups = patch.visibility === 'groups' ? patch.visibleGroups : undefined
+      }
+
       // 版本历史：标题或内容变化时保存旧版本
       if (newTitle !== prev.title || newContent !== prev.content) {
         const history = prev.history ?? []
@@ -204,6 +259,8 @@ export function createKnowledgeService(
         tags: patch.tags ?? prev.tags,
         category,
         cover: patch.cover !== undefined ? patch.cover || undefined : prev.cover,
+        visibility,
+        visibleGroups,
         updatedAt: new Date().toISOString(),
       }
       if (embed && (patch.title || patch.content)) {
@@ -274,10 +331,11 @@ export function createKnowledgeService(
       return entry
     },
 
-    async view(id) {
+    async view(id, viewer) {
       const db = await store.load()
       const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
       if (!entry) return undefined
+      if (viewer && !isVisible(entry, viewer)) return undefined
       entry.views = (entry.views ?? 0) + 1
       await store.save()
       emitChange('update', entry)
@@ -320,7 +378,7 @@ export function createKnowledgeService(
       return removed
     },
 
-    async search(query) {
+    async search(query, viewer) {
       const q = query.trim()
       if (!q) return []
       const db = await store.load()
@@ -365,7 +423,9 @@ export function createKnowledgeService(
         }
       }
 
-      return [...results.values()].sort((a, b) => b.score - a.score)
+      const out = [...results.values()]
+      const visible = viewer ? out.filter((r) => isVisible(r.entry, viewer)) : out
+      return visible.sort((a, b) => b.score - a.score)
     },
 
     async count() {
@@ -373,10 +433,13 @@ export function createKnowledgeService(
       return db.entries.filter((e) => !e.deletedAt).length
     },
 
-    async getCategories() {
+    async getCategories(viewer) {
       const db = await store.load()
       ensureCategories(db)
-      return buildCategoryTree(db.categories, db.entries)
+      const entries = viewer
+        ? db.entries.filter((e) => !e.deletedAt && isVisible(e, viewer))
+        : db.entries
+      return buildCategoryTree(db.categories, entries)
     },
 
     async addCategory(path) {
@@ -405,18 +468,73 @@ export function createKnowledgeService(
       return { updated }
     },
 
-    async listComments(entryId) {
+    async setVisibility(id, visibility, visibleGroups, syncMode = 'self') {
       const db = await store.load()
+      const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
+      if (!entry) return { updated: 0 }
+      const origVis = entry.visibility ?? 'public'
+      const origGroups = entry.visibleGroups ?? []
+      const apply = (e: KnowledgeEntry) => {
+        e.visibility = visibility && visibility !== 'public' ? visibility : undefined
+        e.visibleGroups = visibility === 'groups' ? (visibleGroups ?? []) : undefined
+        e.updatedAt = new Date().toISOString()
+      }
+      apply(entry)
+      let updated = 1
+      if (syncMode === 'all' || syncMode === 'same') {
+        const descendants = collectDescendants(db, id)
+        for (const d of descendants) {
+          if (syncMode === 'all') {
+            apply(d)
+            updated++
+          } else {
+            const dv = d.visibility ?? 'public'
+            const dg = d.visibleGroups ?? []
+            if (dv === origVis && arraysEqual(dg, origGroups)) {
+              apply(d)
+              updated++
+            }
+          }
+        }
+      }
+      await store.save()
+      await refreshFuse()
+      emitChange('update', entry)
+      return { updated }
+    },
+
+    async bulkSetVisibility(ids, visibility, visibleGroups) {
+      const db = await store.load()
+      let updated = 0
+      for (const entry of db.entries) {
+        if (ids.includes(entry.id)) {
+          entry.visibility = visibility && visibility !== 'public' ? visibility : undefined
+          entry.visibleGroups = visibility === 'groups' ? (visibleGroups ?? []) : undefined
+          entry.updatedAt = new Date().toISOString()
+          updated++
+        }
+      }
+      if (updated) await store.save()
+      return { updated }
+    },
+
+    async listComments(entryId, viewer) {
+      const db = await store.load()
+      if (viewer) {
+        const entry = db.entries.find((e) => e.id === entryId && !e.deletedAt)
+        if (!entry || !isVisible(entry, viewer)) return []
+      }
       const comments = db.comments ?? []
       return comments
         .filter((c) => c.entryId === entryId)
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
     },
 
-    async addComment(entryId, input, author) {
+    async addComment(entryId, input, author, viewer) {
       const db = await store.load()
       const entry = db.entries.find((e) => e.id === entryId && !e.deletedAt)
       if (!entry) throw new Error('条目不存在')
+      if (viewer && !isVisible(entry, viewer)) throw new Error('无权访问该文章')
       const content = (input.content || '').trim()
       if (!content) throw new Error('评论内容不能为空')
       if (!db.comments) db.comments = []
@@ -435,9 +553,14 @@ export function createKnowledgeService(
       return comment
     },
 
-    async listAllComments() {
+    async listAllComments(viewer) {
       const db = await store.load()
-      return (db.comments ?? []).slice()
+      const comments = db.comments ?? []
+      if (!viewer) return comments.slice()
+      const visibleIds = new Set(
+        db.entries.filter((e) => !e.deletedAt && isVisible(e, viewer)).map((e) => e.id),
+      )
+      return comments.filter((c) => visibleIds.has(c.entryId))
     },
 
     async removeComment(id, isAdmin, author) {

@@ -50,4 +50,5 @@ export function apply(ctx: Context, config: Config) {
 }
 
 export default { name, apply, Config }
-export type { User, PublicUser, UserRole, AccountService } from './types.js'
+export type { User, PublicUser, UserRole, Group, AccountService } from './types.js'
+export { groupsOf } from './types.js'

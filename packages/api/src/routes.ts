@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { Context } from 'cordis'
-import type { ChatMessage, KnowledgeEntryInput } from '@ikit/core'
+import type { ChatMessage, EntryVisibility, KnowledgeEntryInput, Viewer, VisibilitySyncMode } from '@ikit/core'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
@@ -29,7 +29,7 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   app.get('/api/update/manifest', async (req) => {
     const serverVersion = meta.version ?? '0.1.0'
     if (!meta.staticRoot) {
-      return { currentVersion: serverVersion, latest: serverVersion, hasUpdate: false, bundleUrl: null }
+      return { currentVersion: serverVersion, latest: serverVersion, hasUpdate: false, bundleUrl: null, installerUrl: null }
     }
     try {
       const manifestPath = path.join(meta.staticRoot, 'web-manifest.json')
@@ -38,22 +38,26 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
         version?: string
         buildTime?: string
         bundle?: string
+        installerUrl?: string
       }
       const latest = m.version || serverVersion
       const client = String((req.query as { client?: string }).client ?? '').trim()
       const effectiveCurrent = client || '0.0.0' // 未上报：视为旧版
       const hasUpdate = latest !== effectiveCurrent
+      // 硬更新安装包地址：优先 manifest，其次环境变量 UPDATE_INSTALLER_URL
+      const installerUrl = m.installerUrl ?? process.env.UPDATE_INSTALLER_URL ?? null
       return {
         currentVersion: client ? effectiveCurrent : serverVersion,
         latest,
         hasUpdate,
         // 分发包托管在 /update/<version>/<bundle>
         bundleUrl: hasUpdate && m.bundle ? `/update/${latest}/${m.bundle}` : null,
+        installerUrl,
         buildTime: m.buildTime ?? null,
       }
     } catch {
       // 无 manifest（如开发模式）：视为已最新
-      return { currentVersion: serverVersion, latest: serverVersion, hasUpdate: false, bundleUrl: null }
+      return { currentVersion: serverVersion, latest: serverVersion, hasUpdate: false, bundleUrl: null, installerUrl: null }
     }
   })
 
@@ -87,6 +91,20 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
       }
       return await fn(user)
     })()
+  }
+
+  // 由用户对象解析「可见性判定上下文」（组集合含包含关系展开 + 是否站主）
+  async function viewerOf(user: any): Promise<Viewer> {
+    const groups = await ctx.account.effectiveGroupsOf(user)
+    return { groups, isAdmin: user?.role === 'admin' }
+  }
+
+  async function resolveViewer(req: any): Promise<Viewer> {
+    return viewerOf(await ctx.account.me(tokenOf(req)))
+  }
+
+  function normalizeVisibility(v: string | undefined): EntryVisibility | null {
+    return v === 'public' || v === 'login' || v === 'groups' || v === 'private' ? v : null
   }
 
   // 注册已屏蔽（站主在用户管理手动建号）；保留登录/找回
@@ -145,9 +163,14 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   app.get('/api/auth/users', (req, reply) => requireAdmin(req, reply, async () => ({ users: await ctx.account.listUsers() })))
   app.post('/api/auth/users', (req, reply) =>
     requireAdmin(req, reply, async () => {
-      const body = req.body as { username?: string; password?: string; role?: 'user' | 'admin' }
+      const body = req.body as { username?: string; password?: string; role?: 'user' | 'admin'; groupIds?: string[] }
       try {
-        const user = await ctx.account.createUser(body?.username ?? '', body?.password ?? '', body?.role === 'admin' ? 'admin' : 'user')
+        const user = await ctx.account.createUser(
+          body?.username ?? '',
+          body?.password ?? '',
+          body?.role === 'admin' ? 'admin' : 'user',
+          body?.groupIds,
+        )
         return reply.code(201).send({ user, users: await ctx.account.listUsers() })
       } catch (e: any) {
         return reply.code(400).send({ error: e.message })
@@ -175,6 +198,66 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     }),
   )
 
+  // 设置用户所属组（多组）
+  app.post('/api/auth/users/:id/groups', (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      const id = (req.params as { id: string }).id
+      const body = req.body as { groupIds?: string[] }
+      try {
+        return { users: await ctx.account.setUserGroups(id, body?.groupIds ?? []) }
+      } catch (e: any) {
+        return reply.code(400).send({ error: e.message })
+      }
+    }),
+  )
+
+  // ---- 用户组管理（站主） ----
+  app.get('/api/groups', (req, reply) =>
+    requireAdmin(req, reply, async () => ({ groups: await ctx.account.listGroups() })),
+  )
+  app.post('/api/groups', (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      const body = req.body as { name?: string; description?: string; parentId?: string }
+      try {
+        return { groups: await ctx.account.createGroup(body?.name ?? '', body?.description, body?.parentId) }
+      } catch (e: any) {
+        return reply.code(400).send({ error: e.message })
+      }
+    }),
+  )
+  app.post('/api/groups/:id/parent', (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      const id = (req.params as { id: string }).id
+      const body = req.body as { parentId?: string | null }
+      try {
+        return { groups: await ctx.account.setGroupParent(id, body?.parentId ?? undefined) }
+      } catch (e: any) {
+        return reply.code(400).send({ error: e.message })
+      }
+    }),
+  )
+  app.patch('/api/groups/:id', (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      const id = (req.params as { id: string }).id
+      const body = req.body as { name?: string }
+      try {
+        return { groups: await ctx.account.renameGroup(id, body?.name ?? '') }
+      } catch (e: any) {
+        return reply.code(400).send({ error: e.message })
+      }
+    }),
+  )
+  app.delete('/api/groups/:id', (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      const id = (req.params as { id: string }).id
+      try {
+        return { groups: await ctx.account.deleteGroup(id) }
+      } catch (e: any) {
+        return reply.code(400).send({ error: e.message })
+      }
+    }),
+  )
+
   // ---- 插件注册表（权限核心闭环） ----
   // 解析当前角色：仅从 Authorization Bearer token 解析真实用户角色；无有效会话一律 guest
   async function resolveRole(req: any): Promise<'guest' | 'user' | 'admin'> {
@@ -184,10 +267,12 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     return role
   }
 
-  // 获取当前角色可见的插件（前台功能区数据源）
+  // 获取当前用户可见的插件（前台功能区数据源，按用户组判定）
   app.get('/api/plugins/visible', async (req) => {
-    const role = await resolveRole(req)
-    return { role, plugins: ctx.pluginRegistry.visibleFor(role) }
+    const user = await ctx.account.me(tokenOf(req))
+    const viewer = await viewerOf(user)
+    const role = !user ? 'guest' : user.role === 'admin' ? 'admin' : 'user'
+    return { role, groups: viewer.groups, plugins: ctx.pluginRegistry.visibleFor(viewer.groups, viewer.isAdmin) }
   })
 
   // 获取全部插件（站主管理用）
@@ -216,16 +301,15 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     return { plugins }
   })
 
-  // 按角色可见性
-  app.post('/api/plugins/:name/visibility', async (req, reply) => {
-    const name = (req.params as { name: string }).name
-    const body = req.body as { role?: string; visible?: boolean }
-    const role = (['guest', 'user', 'admin'].includes(body?.role ?? '')
-      ? body!.role
-      : 'guest') as 'guest' | 'user' | 'admin'
-    const plugins = await ctx.pluginRegistry.setVisibility(name, role, !!body?.visible)
-    return { plugins }
-  })
+  // 按用户组设置可见性
+  app.post('/api/plugins/:name/visibility', (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      const name = (req.params as { name: string }).name
+      const body = req.body as { groups?: string[] }
+      const plugins = await ctx.pluginRegistry.setGroups(name, body?.groups ?? [])
+      return { plugins }
+    }),
+  )
 
   // ---- 插件商店 ----
   app.get('/api/plugin-store', async () => ({
@@ -366,9 +450,11 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     const q = req.query as { limit?: string; offset?: string }
     const limit = q.limit ? Number(q.limit) : undefined
     const offset = q.offset ? Number(q.offset) : undefined
+    const viewer = await resolveViewer(req)
     return {
       entries: await ctx.knowledge.list(
         limit != null ? { limit, offset } : undefined,
+        viewer,
       ),
     }
   })
@@ -386,6 +472,8 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
         category: body.category,
         parentId: body.parentId,
         cover: body.cover,
+        visibility: normalizeVisibility(body.visibility) ?? undefined,
+        visibleGroups: body.visibleGroups,
       })
       return reply.code(201).send({ entry })
     }),
@@ -400,24 +488,29 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     }),
   )
 
-  // 访问计数（公开，无需登录；打开/浏览条目时调用）
+  // 访问计数（公开，无需登录；不可见文章不计数）
   app.post('/api/knowledge/entries/:id/view', async (req) => {
     const id = (req.params as { id: string }).id
-    const entry = await ctx.knowledge.view(id)
+    const entry = await ctx.knowledge.view(id, await resolveViewer(req))
     return { entry }
   })
 
   // ---- 评论 ----
   app.get('/api/knowledge/entries/:id/comments', async (req) => {
     const id = (req.params as { id: string }).id
-    return { comments: await ctx.knowledge.listComments(id) }
+    return { comments: await ctx.knowledge.listComments(id, await resolveViewer(req)) }
   })
   app.post('/api/knowledge/entries/:id/comments', (req, reply) =>
     requireUser(req, reply, async (user) => {
       const id = (req.params as { id: string }).id
       const body = req.body as { content?: string; parentId?: string }
       try {
-        const comment = await ctx.knowledge.addComment(id, { content: body?.content ?? '', parentId: body?.parentId }, user.username)
+        const comment = await ctx.knowledge.addComment(
+          id,
+          { content: body?.content ?? '', parentId: body?.parentId },
+          user.username,
+          await viewerOf(user),
+        )
         return reply.code(201).send({ comment })
       } catch (e: any) {
         return reply.code(400).send({ error: e.message })
@@ -440,7 +533,7 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   app.get('/api/knowledge/comments', async (req) => {
     const q = req.query as { limit?: string }
     const limit = Math.max(1, Math.min(20, parseInt(q?.limit ?? '10', 10) || 10))
-    const all = await ctx.knowledge.listAllComments()
+    const all = await ctx.knowledge.listAllComments(await resolveViewer(req))
     const comments = (all ?? []).sort(
       (a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
     )
@@ -488,9 +581,11 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   )
 
   // ---- 回收站 ----
-  app.get('/api/knowledge/trash', async () => ({
-    entries: await ctx.knowledge.listTrash(),
-  }))
+  app.get('/api/knowledge/trash', (req, reply) =>
+    requireAdmin(req, reply, async () => ({
+      entries: await ctx.knowledge.listTrash(),
+    })),
+  )
 
   app.post('/api/knowledge/trash/:id/restore', (req, reply) =>
     requireAdmin(req, reply, async () => {
@@ -517,8 +612,8 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   )
 
   // ---- 知识库分类 ----
-  app.get('/api/knowledge/categories', async () => ({
-    categories: await ctx.knowledge.getCategories(),
+  app.get('/api/knowledge/categories', async (req) => ({
+    categories: await ctx.knowledge.getCategories(await resolveViewer(req)),
   }))
 
   app.post('/api/knowledge/categories', (req, reply) =>
@@ -538,6 +633,31 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
         return reply.code(400).send({ error: 'ids array is required' })
       }
       return await ctx.knowledge.bulkSetCategory(body.ids, body.category)
+    }),
+  )
+
+  // ---- 文章可见性（站主） ----
+  app.patch('/api/knowledge/entries/:id/visibility', (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      const id = (req.params as { id: string }).id
+      const body = req.body as { visibility?: string; visibleGroups?: string[]; mode?: string }
+      const visibility = normalizeVisibility(body?.visibility)
+      if (!visibility) return reply.code(400).send({ error: 'invalid visibility' })
+      const mode: VisibilitySyncMode =
+        body?.mode === 'same' || body?.mode === 'all' ? body.mode : 'self'
+      return await ctx.knowledge.setVisibility(id, visibility, body?.visibleGroups, mode)
+    }),
+  )
+
+  app.post('/api/knowledge/batch-visibility', (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      const body = req.body as { ids?: string[]; visibility?: string; visibleGroups?: string[] }
+      if (!Array.isArray(body?.ids) || !body.ids.length) {
+        return reply.code(400).send({ error: 'ids array is required' })
+      }
+      const visibility = normalizeVisibility(body?.visibility)
+      if (!visibility) return reply.code(400).send({ error: 'invalid visibility' })
+      return await ctx.knowledge.bulkSetVisibility(body.ids, visibility, body?.visibleGroups)
     }),
   )
 

@@ -1,15 +1,6 @@
 // 插件注册表类型定义
 export type PluginRole = 'guest' | 'user' | 'admin'
 
-export interface PluginVisibility {
-  /** 游客（未登录）可见 */
-  guest: boolean
-  /** 注册用户可见 */
-  user: boolean
-  /** 站主可见 */
-  admin: boolean
-}
-
 export interface PluginRecord {
   /** 插件标识：agent / knowledge / system ... */
   name: string
@@ -23,8 +14,8 @@ export interface PluginRecord {
   builtin: boolean
   /** 排序序号（越小越靠前） */
   order: number
-  /** 按角色可见性 */
-  visibility: PluginVisibility
+  /** 可见用户组 id 列表（内置 guest/user/admin + 自定义组） */
+  visibleGroups: string[]
   /** 前端挂载的 panel 组件标识 */
   panel?: string
 }
@@ -69,11 +60,11 @@ export interface PluginConfig {
 
 export interface PluginRegistryService {
   list(): PluginRecord[]
-  /** 按角色返回可见且启用的插件 */
-  visibleFor(role: PluginRole): PluginRecord[]
+  /** 按用户组返回可见且启用的插件（admin 恒可见） */
+  visibleFor(groups: string[], isAdmin: boolean): PluginRecord[]
   enable(name: string, on: boolean): Promise<PluginRecord[]>
   setOrder(orderedNames: string[]): Promise<PluginRecord[]>
-  setVisibility(name: string, role: PluginRole, visible: boolean): Promise<PluginRecord[]>
+  setGroups(name: string, groups: string[]): Promise<PluginRecord[]>
   /** 插件商店目录（含已安装状态 + 评分评论） */
   store(): PluginStoreItem[]
   /** 安装商店插件（加入注册表，非内置） */

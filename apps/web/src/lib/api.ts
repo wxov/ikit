@@ -7,6 +7,8 @@ export interface EntryVersion {
   updatedAt: string
 }
 
+export type EntryVisibility = 'public' | 'login' | 'groups' | 'private'
+
 export interface KnowledgeEntry {
   id: string
   title: string
@@ -24,6 +26,8 @@ export interface KnowledgeEntry {
   views?: number
   cover?: string
   shareToken?: string
+  visibility?: EntryVisibility
+  visibleGroups?: string[]
   createdAt: string
   updatedAt: string
 }

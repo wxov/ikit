@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { Schema } from 'cordis'
 import type { Context } from 'cordis'
 import type { LlmService } from '@ikit/plugin-llm'
@@ -41,6 +41,7 @@ export const Config: Schema<Config> = Schema.object({
 
 export function apply(ctx: Context, config: Config) {
   const dataDir = config.dataDir ?? './data'
+  mkdirSync(dataDir, { recursive: true })
   const filename = config.filename ?? 'knowledge.json'
   const storage = config.storage ?? 'json'
 

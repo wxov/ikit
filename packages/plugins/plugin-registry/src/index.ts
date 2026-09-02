@@ -40,7 +40,7 @@ export function apply(ctx: Context, config: Config) {
       enabled: true,
       builtin: true,
       order: 2,
-      visibility: { guest: true, user: true, admin: true },
+      visibleGroups: ['guest', 'user', 'admin'],
       panel: 'agent',
     },
   ]

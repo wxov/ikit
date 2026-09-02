@@ -4,13 +4,12 @@ import type {
   PluginConfig,
   PluginRegistryService,
   PluginRecord,
-  PluginRole,
   PluginStoreItem,
 } from './types.js'
 import type { JsonPluginStore } from './store.js'
 
-function defaultVisibility(): PluginRecord['visibility'] {
-  return { guest: true, user: true, admin: true }
+function defaultVisibility(): string[] {
+  return ['guest', 'user', 'admin']
 }
 
 // 默认功能插件：随系统内置，不在插件库中管理（不显示、不可卸载、不参与可见性配置）
@@ -128,6 +127,22 @@ export function createPluginRegistry(
       config.plugins = config.plugins.filter((p) => !DEFAULT_FEATURES.has(p.name))
       await store.save(config)
     }
+    // 迁移：旧「visibility 布尔对象」→「visibleGroups 组集合」
+    let migrated = false
+    for (const p of config.plugins as any[]) {
+      if (!Array.isArray(p.visibleGroups)) {
+        const g: string[] = []
+        if (p.visibility && typeof p.visibility === 'object') {
+          if (p.visibility.guest) g.push('guest')
+          if (p.visibility.user) g.push('user')
+          if (p.visibility.admin) g.push('admin')
+        }
+        p.visibleGroups = g.length ? g : defaultVisibility()
+        migrated = true
+      }
+      delete p.visibility
+    }
+    if (migrated) await store.save(config)
     loaded = true
     await applySeed(seed)
   }
@@ -137,7 +152,7 @@ export function createPluginRegistry(
     let changed = false
     for (const d of defaults) {
       if (!byName.has(d.name)) {
-        config.plugins.push({ ...structuredClone(d), visibility: defaultVisibility() })
+        config.plugins.push({ ...structuredClone(d), visibleGroups: defaultVisibility() })
         changed = true
       } else {
         const existing = byName.get(d.name)!
@@ -180,9 +195,9 @@ export function createPluginRegistry(
       return config.plugins
     },
 
-    visibleFor(role: PluginRole) {
+    visibleFor(groups: string[], isAdmin: boolean) {
       return config.plugins
-        .filter((p) => p.enabled && p.visibility[role])
+        .filter((p) => p.enabled && (isAdmin || p.visibleGroups.some((g) => groups.includes(g))))
         .sort((a, b) => a.order - b.order)
     },
 
@@ -216,11 +231,11 @@ export function createPluginRegistry(
       return config.plugins
     },
 
-    async setVisibility(name, role, visible) {
+    async setGroups(name, groups) {
       await ensureLoaded()
       const p = config.plugins.find((x) => x.name === name)
       if (!p) return config.plugins
-      p.visibility[role] = visible
+      p.visibleGroups = [...new Set((groups || []).filter((g) => typeof g === 'string'))]
       await persist()
       return config.plugins
     },
@@ -265,7 +280,7 @@ export function createPluginRegistry(
           enabled: true,
           builtin: false,
           order: config.plugins.length,
-          visibility: defaultVisibility(),
+          visibleGroups: defaultVisibility(),
           panel: p.panel || p.name,
         })
       }
@@ -285,7 +300,7 @@ export function createPluginRegistry(
         enabled: true, // 真实插件包：安装即启用，可在插件管理关闭
         builtin: false,
         order: config.plugins.length,
-        visibility: defaultVisibility(),
+        visibleGroups: defaultVisibility(),
         panel: item.name,
       })
       await persist()

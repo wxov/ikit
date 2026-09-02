@@ -4,8 +4,6 @@ import { createSocket, api, type EventItem, type WsStatus } from './lib/api'
 import {
   fetchUpdateManifest,
   hasUpdate as hasUpdateFn,
-  applyUpdate,
-  detectPlatform,
   type UpdateInfo,
 } from './lib/update'
 import { getToken, setToken, logout, currentUser, type PublicUser } from './lib/auth'
@@ -26,6 +24,7 @@ import ArchiveView from './components/ArchiveView.vue'
 import TrashView from './components/TrashView.vue'
 import UserProfile from './components/UserProfile.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
+import UpdateDialog from './components/UpdateDialog.vue'
 
 // role 决定前台功能区可见插件；'manager' 为站主专用插件管理页；'users' 为站主用户管理
 type Tab = string
@@ -229,8 +228,7 @@ function submitGlobalSearch() {
 // 热更新
 const updateInfo = ref<UpdateInfo | null>(null)
 const updateAvailable = ref(false)
-const updating = ref(false)
-const updatePlatform = ref(detectPlatform())
+const updateOpen = ref(false)
 
 async function checkUpdate() {
   const info = await fetchUpdateManifest()
@@ -251,20 +249,14 @@ function onVisibilityChanged() {
   if (document.visibilityState === 'visible') checkUpdate()
 }
 
-async function doUpdate() {
-  if (!updateInfo.value?.bundleUrl) return
-  updating.value = true
-  try {
-    const res = await applyUpdate(updateInfo.value, updateInfo.value.bundleUrl)
-    if (!res.applied && res.platform !== 'web') {
-      // 原生热更新未激活：提示用户在插件管理/设置中确认原生端，而非跳转页面下载
-      alert('当前环境的原生热更新未激活。请使用最新安装包，或在支持热更新的客户端内体验。')
-    }
-  } catch (e: any) {
-    console.warn('[update] apply failed:', e)
-  } finally {
-    updating.value = false
-  }
+function onUpdateApplied() {
+  updateAvailable.value = false
+}
+
+function onRequestUpdate(info: UpdateInfo) {
+  updateInfo.value = info
+  updateOpen.value = true
+  settingsOpen.value = false
 }
 
 function dismissUpdate() {
@@ -417,9 +409,7 @@ onUnmounted(() => {
         <b>v{{ updateInfo?.latest }}</b>
         (当前 v{{ updateInfo?.currentVersion }})
       </span>
-      <button class="ub-btn" :disabled="updating" @click="doUpdate">
-        {{ updating ? '更新中…' : updatePlatform === 'web' ? '刷新更新' : '立即更新' }}
-      </button>
+      <button class="ub-btn" @click="updateOpen = true">更新</button>
       <button class="ub-dismiss" title="稍后" @click="dismissUpdate">×</button>
     </div>
 
@@ -532,10 +522,22 @@ onUnmounted(() => {
     />
 
     <!-- 设置（检查更新 / 关于 / 帮助） -->
-    <SettingsPanel v-if="settingsOpen" @close="settingsOpen = false" />
+    <SettingsPanel
+      v-if="settingsOpen"
+      @close="settingsOpen = false"
+      @request-update="onRequestUpdate"
+    />
 
     <!-- 编辑资料（改用户名 / 密码） -->
     <UserProfile v-if="profileOpen" @updated="onProfileUpdated" @close="profileOpen = false" />
+
+    <!-- 软件更新（确认 → 进度 → 应用 / 硬更新安装） -->
+    <UpdateDialog
+      v-if="updateOpen && updateInfo"
+      :info="updateInfo"
+      @close="updateOpen = false"
+      @applied="onUpdateApplied"
+    />
 
     <!-- 移动端底部 Tab Bar -->
     <nav class="bottom-tabbar">

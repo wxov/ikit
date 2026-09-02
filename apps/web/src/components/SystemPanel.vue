@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, inject, type Ref } from 'vue'
 import { api, type EventItem } from '../lib/api'
+import ArticlePermissions from './ArticlePermissions.vue'
 
 interface PluginMeta {
   name: string
@@ -67,6 +68,12 @@ async function sayHello() {
           </div>
         </div>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>文章权限批量操作</h2>
+      <p class="muted">树形列出所有文章，勾选后统一设置可见性（勾选父级会连带勾选子级）。</p>
+      <ArticlePermissions />
     </div>
 
     <div class="card">

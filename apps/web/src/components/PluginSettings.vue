@@ -4,26 +4,27 @@ import {
   fetchAllPlugins,
   setPluginEnabled,
   setPluginOrder,
-  setPluginVisibility,
+  setPluginGroups,
   type PluginRecord,
-  type PluginRole,
 } from '../lib/plugins'
+import { listGroups, type Group } from '../lib/auth'
 
 const plugins = ref<PluginRecord[]>([])
+const groups = ref<Group[]>([])
 const loading = ref(false)
 const notice = ref('')
-
-const ROLES: { key: PluginRole; label: string }[] = [
-  { key: 'guest', label: '游客' },
-  { key: 'user', label: '注册用户' },
-  { key: 'admin', label: '站主' },
-]
 
 async function load() {
   loading.value = true
   try {
     const r = await fetchAllPlugins()
     plugins.value = r.plugins
+    try {
+      const g = await listGroups()
+      groups.value = g.groups
+    } catch {
+      groups.value = []
+    }
   } catch (e: any) {
     notice.value = e.message
   } finally {
@@ -36,8 +37,11 @@ async function toggleEnabled(p: PluginRecord) {
   plugins.value = r.plugins
 }
 
-async function toggleVisibility(p: PluginRecord, role: PluginRole) {
-  const r = await setPluginVisibility(p.name, role, !p.visibility[role])
+async function toggleGroup(p: PluginRecord, gid: string) {
+  const next = new Set(p.visibleGroups)
+  if (next.has(gid)) next.delete(gid)
+  else next.add(gid)
+  const r = await setPluginGroups(p.name, [...next])
   plugins.value = r.plugins
 }
 
@@ -62,7 +66,7 @@ onMounted(load)
   <div class="plugin-settings">
     <div class="ps-head">
       <h3>插件管理</h3>
-      <span class="ps-sub">启用/禁用、拖拽排序、按角色设置可见性（即时生效）</span>
+      <span class="ps-sub">启用/禁用、拖拽排序、按用户组设置可见性（即时生效）</span>
     </div>
     <div v-if="notice" class="ps-notice">{{ notice }}</div>
     <div v-if="loading" class="ps-empty">加载中…</div>
@@ -88,16 +92,16 @@ onMounted(load)
           </button>
         </div>
         <div class="ps-visibility">
-          <span class="ps-vlabel">可见角色</span>
+          <span class="ps-vlabel">可见用户组</span>
           <div
-            v-for="r in ROLES"
-            :key="r.key"
+            v-for="g in groups"
+            :key="g.id"
             class="ps-role"
-            :class="{ on: p.visibility[r.key] }"
-            @click="toggleVisibility(p, r.key)"
+            :class="{ on: p.visibleGroups.includes(g.id) }"
+            @click="toggleGroup(p, g.id)"
           >
-            <span class="ps-role-check">{{ p.visibility[r.key] ? '✓' : '' }}</span>
-            {{ r.label }}
+            <span class="ps-role-check">{{ p.visibleGroups.includes(g.id) ? '✓' : '' }}</span>
+            {{ g.name }}{{ g.builtin ? '·内置' : '' }}
           </div>
         </div>
       </div>

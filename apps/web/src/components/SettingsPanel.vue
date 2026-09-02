@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import { api } from '../lib/api'
 import { fetchUpdateManifest, hasUpdate as hasUpdateFn, detectPlatform, type UpdateInfo } from '../lib/update'
 
-const emit = defineEmits<{ (e: 'close'): void }>()
+const emit = defineEmits<{ (e: 'close'): void; (e: 'request-update', info: UpdateInfo): void }>()
 const tab = ref<'update' | 'about' | 'help'>('update')
 const info = ref<UpdateInfo | null>(null)
 const checking = ref(false)
@@ -21,11 +21,8 @@ async function checkUpdate() {
   }
 }
 
-function applyUpdate() {
-  if (info.value?.bundleUrl) {
-    if (platform === 'web') location.reload()
-    else alert('请使用最新安装包，或确认原生热更新已激活（Tauri apply_web_update / Capacitor WebUpdate）。')
-  }
+function openUpdate() {
+  if (info.value) emit('request-update', info.value)
 }
 
 async function loadSystem() {
@@ -73,7 +70,7 @@ const FAQS: Array<[string, string]> = [
         </div>
         <div v-if="checked && info" class="up-result" :class="{ ok: !hasUpdateFn(info), bad: hasUpdateFn(info) }">
           <template v-if="hasUpdateFn(info)">
-            发现新版本 v{{ info.latest }}，<a class="up-link" @click="applyUpdate">{{ platform === 'web' ? '刷新更新' : '查看更新方式' }}</a>
+            发现新版本 v{{ info.latest }}，<a class="up-link" @click="openUpdate">更新</a>
           </template>
           <template v-else>已是最新版本（v{{ info.latest }}）</template>
         </div>

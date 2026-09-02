@@ -23,6 +23,8 @@ const manifest = {
   version,
   buildTime: new Date().toISOString(),
   bundle: `web-update-${version}.zip`,
+  // 硬更新安装包地址（可选）：构建时通过 UPDATE_INSTALLER_URL 注入
+  installerUrl: process.env.UPDATE_INSTALLER_URL ?? null,
 }
 writeFileSync(path.join(distDir, 'web-manifest.json'), JSON.stringify(manifest, null, 2))
 console.log(`[update] wrote dist/web-manifest.json (version=${version})`)
