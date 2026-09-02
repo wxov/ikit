@@ -1,10 +1,10 @@
 {
   "name": "i-kit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.33.2",
-  "description": "鏈哄櫒浜?+ Web 鏈嶅姟 + AI Agent 鎴愬椤圭洰锛屽熀浜?Cordis 鎻掍欢鏋舵瀯",
+  "description": "閺堝搫娅掓禍?+ Web 閺堝秴濮?+ AI Agent 閹存劕顨滄い鍦窗閿涘苯鐔€娴?Cordis 閹绘帊娆㈤弸鑸电€?,
   "scripts": {
     "dev": "pnpm --filter @ikit/server dev",
     "dev:web": "pnpm --filter @ikit/web dev",

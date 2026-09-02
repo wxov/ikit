@@ -45,6 +45,8 @@ export interface AccountService {
   listUsers(): Promise<PublicUser[]>
   /** 站主手动添加用户（用于屏蔽注册后由站主创建账号） */
   createUser(username: string, password: string, role?: 'user' | 'admin'): Promise<PublicUser>
+  /** 用户自助修改资料：改用户名（唯一性校验）/ 改密码（需原密码） */
+  updateProfile(id: string, patch: { username?: string; oldPassword?: string; newPassword?: string }): Promise<PublicUser>
   disableUser(id: string, disabled: boolean): Promise<PublicUser[]>
   deleteUser(id: string): Promise<PublicUser[]>
   setRole(id: string, role: 'user' | 'admin'): Promise<PublicUser[]>

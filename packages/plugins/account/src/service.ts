@@ -157,6 +157,29 @@ export function createAccount(
       return toPublic(user)
     },
 
+    async updateProfile(id, patch) {
+      await ensureLoaded()
+      const user = config.users.find((u) => u.id === id)
+      if (!user) throw new Error('用户不存在')
+      if (patch.username !== undefined && patch.username.trim() !== user.username) {
+        const name = patch.username.trim()
+        if (!name) throw new Error('用户名不能为空')
+        const existing = findUser(name)
+        if (existing && existing.id !== id) throw new Error('该用户名已存在')
+        user.username = name
+      }
+      if (patch.newPassword) {
+        if (patch.newPassword.length < 6) throw new Error('新密码至少 6 位')
+        if (!patch.oldPassword || !(await verifyPassword(patch.oldPassword, user.passwordHash))) {
+          throw new Error('原密码错误')
+        }
+        user.passwordHash = await hashPassword(patch.newPassword)
+      }
+      user.updatedAt = new Date().toISOString()
+      await persist()
+      return toPublic(user)
+    },
+
     async disableUser(id, disabled) {
       await ensureLoaded()
       const u = config.users.find((x) => x.id === id)

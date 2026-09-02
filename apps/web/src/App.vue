@@ -24,6 +24,8 @@ import ArticleEditor from './components/ArticleEditor.vue'
 import DocTree from './components/DocTree.vue'
 import ArchiveView from './components/ArchiveView.vue'
 import TrashView from './components/TrashView.vue'
+import UserProfile from './components/UserProfile.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
 
 // role 决定前台功能区可见插件；'manager' 为站主专用插件管理页；'users' 为站主用户管理
 type Tab = string
@@ -118,6 +120,12 @@ function onAuthed(u: { role: string }) {
   refreshPlugins()
 }
 
+function onProfileUpdated(u: import('./lib/auth').PublicUser) {
+  user.value = u
+  role.value = (u.role as PluginRole) || 'guest'
+  refreshPlugins()
+}
+
 async function doLogout() {
   try {
     await logout()
@@ -149,6 +157,12 @@ const docTreeKey = ref(0)
 // 全局筛选：分类 / 标签（来自右栏，联动中栏卡片流与左栏目录）
 const filterCat = ref('')
 const filterTag = ref('')
+// 设置 / 编辑资料弹窗
+const settingsOpen = ref(false)
+const profileOpen = ref(false)
+// 窄屏侧栏抽屉（<1200px 时左右侧栏收纳为抽屉）
+const sideLeftOpen = ref(false)
+const sideRightOpen = ref(false)
 
 // 门户首页（知识卡片流）
 function goHome() {
@@ -268,6 +282,7 @@ provide('events', events)
 provide('canWrite', computed(() => !!user.value))
 provide('userRole', computed(() => user.value?.role ?? 'guest'))
 provide('username', computed(() => user.value?.username ?? ''))
+provide('currentUser', user)
 
 let socket: ReturnType<typeof createSocket> | null = null
 
@@ -325,6 +340,11 @@ onUnmounted(() => {
 <template>
   <div class="app">
     <header class="topbar">
+      <!-- 窄屏侧栏开关（<1200px 显示；置于最左） -->
+      <div class="side-toggle">
+        <button class="side-btn" title="目录导航" @click="sideLeftOpen = !sideLeftOpen">☰</button>
+        <button class="side-btn" title="侧边栏" @click="sideRightOpen = !sideRightOpen">◫</button>
+      </div>
       <div class="brand">
         <span class="brand-logo">🧠</span>
         <span class="brand-name">i-kit</span>
@@ -351,7 +371,9 @@ onUnmounted(() => {
           wsStatus === 'open' ? '已连接' : wsStatus === 'connecting' ? '连接中' : '已断开'
         }}
       </span>
+      <!-- 窄屏侧栏开关（<1200px 显示） -->
       <!-- 头像：点击弹登录框（未登录）或用户菜单（已登录） -->
+      <button class="settings-btn" title="设置" @click="settingsOpen = true">⚙️</button>
       <div v-if="user" class="avatar-wrap" @click.stop>
         <button class="avatar-btn" title="账号" @click="avatarOpen = !avatarOpen">
           <span class="avatar-avatar">{{ user.username.slice(0, 1).toUpperCase() }}</span>
@@ -359,6 +381,8 @@ onUnmounted(() => {
         <div v-if="avatarOpen" class="avatar-dropdown" @click.stop>
           <div class="ad-name">{{ user.username }}</div>
           <div class="ad-role">{{ user.role === 'admin' ? '站主' : '用户' }}</div>
+          <button class="ad-item" @click="profileOpen = true; avatarOpen = false">✏️ 编辑资料</button>
+          <button class="ad-item" @click="settingsOpen = true; avatarOpen = false">⚙️ 设置</button>
           <button class="ad-item" @click="doLogout">退出登录</button>
         </div>
       </div>
@@ -384,7 +408,7 @@ onUnmounted(() => {
       <button class="ub-dismiss" title="稍后" @click="dismissUpdate">×</button>
     </div>
 
-    <div class="portal">
+    <div class="portal" :class="{ 'side-open-left': sideLeftOpen, 'side-open-right': sideRightOpen }">
       <!-- 左侧导航（桌面） -->
       <aside class="portal-left">
         <div class="pl-moto">以不折腾为目标的折腾</div>
@@ -469,6 +493,13 @@ onUnmounted(() => {
       <span class="bb-right">© 2026 · 三端同源（Web / 桌面 / 移动）</span>
     </footer>
 
+    <!-- 窄屏侧栏抽屉遮罩 -->
+    <div
+      v-if="sideLeftOpen || sideRightOpen"
+      class="side-backdrop"
+      @click="sideLeftOpen = false; sideRightOpen = false"
+    ></div>
+
     <!-- 登录/注册/找回 -->
     <div v-if="showAuth" class="auth-overlay" @click.self="showAuth = false">
       <AuthPanel @authed="onAuthed" />
@@ -484,6 +515,12 @@ onUnmounted(() => {
       @saved="onEditorSaved"
       @cancel="editorOpen = false"
     />
+
+    <!-- 设置（检查更新 / 关于 / 帮助） -->
+    <SettingsPanel v-if="settingsOpen" @close="settingsOpen = false" />
+
+    <!-- 编辑资料（改用户名 / 密码） -->
+    <UserProfile v-if="profileOpen" @updated="onProfileUpdated" @close="profileOpen = false" />
 
     <!-- 移动端底部 Tab Bar -->
     <nav class="bottom-tabbar">
@@ -501,6 +538,11 @@ onUnmounted(() => {
       >
         <span class="tab-icon">{{ p.panel === 'agent' ? '🤖' : p.panel === 'knowledge' ? '📚' : '🧩' }}</span>
         <span class="tab-label">{{ p.title }}</span>
+      </button>
+      <!-- 设置（桌面/移动通用） -->
+      <button class="settings-tab" @click="settingsOpen = true">
+        <span class="tab-icon">🔧</span>
+        <span class="tab-label">设置</span>
       </button>
       <!-- 站主管理：与功能插件分开的独立入口 -->
       <button
@@ -583,6 +625,27 @@ onUnmounted(() => {
   color: var(--muted);
 }
 
+.settings-btn {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+.settings-btn:hover { background: var(--primary-soft); }
+/* 窄屏侧栏开关（默认隐藏，<1200px 显示） */
+.side-toggle { display: none; align-items: center; gap: 6px; flex: 0 0 auto; }
+.side-btn {
+  border: 1px solid var(--border); background: var(--panel); border-radius: 8px;
+  padding: 6px 10px; cursor: pointer; font-size: 15px; line-height: 1;
+}
+.side-btn:hover { background: var(--primary-soft); }
+.side-backdrop {
+  display: none; position: fixed; inset: 60px 0 0; z-index: 385;
+  background: rgba(15, 23, 42, 0.35);
+}
 .theme-toggle {
   border: 1px solid var(--border);
   background: var(--panel);
@@ -624,11 +687,11 @@ onUnmounted(() => {
 [data-theme='dark'] .topbar {
   background: color-mix(in srgb, var(--panel) 72%, transparent);
 }
-.brand { display: flex; align-items: center; gap: 6px; }
+.brand { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; white-space: nowrap; }
 .brand-logo { font-size: 20px; }
 .brand-name { font-size: 17px; font-weight: 700; }
 .brand-sub { font-size: 11px; color: var(--muted); padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; }
-.global-search { flex: 0 1 260px; }
+.global-search { flex: 1 1 auto; min-width: 80px; }
 .global-search input {
   width: 100%;
   padding: 8px 14px;
@@ -784,10 +847,35 @@ onUnmounted(() => {
 .pl-group-title { font-size: 11px; color: var(--muted); display: block; margin-bottom: 4px; padding-left: 10px; }
 .pl-ico { width: 20px; text-align: center; }
 
+/* 窄屏（<1200px）：单栏 + 左右侧栏收为抽屉，顶栏提供 ☰/◫ 开关 */
+@media (max-width: 1199px) {
+  .portal { grid-template-columns: minmax(0, 1fr); }
+  .side-toggle { display: flex; }
+  .brand-sub { display: none; }
+  .portal-left, .portal-right {
+    position: fixed;
+    top: 60px;
+    bottom: 0;
+    height: auto;
+    max-height: none;
+    width: min(320px, 84vw);
+    z-index: 410;
+    border-radius: 0;
+    transition: transform 0.25s ease;
+  }
+  .portal-left { left: 0; transform: translateX(-105%); }
+  .portal-right { right: 0; transform: translateX(105%); }
+  .portal.side-open-left .portal-left { transform: translateX(0); box-shadow: 8px 0 24px rgba(0,0,0,.15); }
+  .portal.side-open-right .portal-right { transform: translateX(0); box-shadow: -8px 0 24px rgba(0,0,0,.15); }
+  .side-backdrop { display: block; }
+}
+
 @media (max-width: 768px) {
   .topbar nav {
     display: none;
   }
+  .topbar { gap: 10px; padding: 0 12px; }
+  .ws { display: none; }
   .bottom-bar { display: none; }
   .bottom-tabbar {
     display: flex;
@@ -823,7 +911,6 @@ onUnmounted(() => {
     line-height: 1;
   }
   .portal { grid-template-columns: 1fr; padding: 12px; }
-  .portal-left, .portal-right { display: none; }
   .brand-sub { display: none; }
   .global-search { flex: 1; }
   .portal-main, main {

@@ -121,6 +121,23 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     return { ok: true }
   })
 
+  // ---- 用户自助修改资料（改用户名 / 改密码）----
+  app.post('/api/auth/profile', (req, reply) =>
+    requireUser(req, reply, async (user) => {
+      const body = req.body as { username?: string; oldPassword?: string; newPassword?: string }
+      try {
+        const updated = await ctx.account.updateProfile(user.id, {
+          username: body?.username,
+          oldPassword: body?.oldPassword,
+          newPassword: body?.newPassword,
+        })
+        return { user: updated }
+      } catch (e: any) {
+        return reply.code(400).send({ error: e.message })
+      }
+    }),
+  )
+
   // ---- 站主管理用户 ----
   app.get('/api/auth/users', (req, reply) => requireAdmin(req, reply, async () => ({ users: await ctx.account.listUsers() })))
   app.post('/api/auth/users', (req, reply) =>
