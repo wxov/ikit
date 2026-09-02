@@ -240,6 +240,17 @@ async function checkUpdate() {
   }
 }
 
+// 主动推送：定期轮询 + 窗口聚焦/可见时检查（应用打开期间无需重启即可发现更新）
+let updateTimer: number | undefined
+function scheduleUpdateChecks() {
+  updateTimer = window.setInterval(() => checkUpdate(), 10 * 60 * 1000)
+  document.addEventListener('visibilitychange', onVisibilityChanged)
+  window.addEventListener('focus', checkUpdate)
+}
+function onVisibilityChanged() {
+  if (document.visibilityState === 'visible') checkUpdate()
+}
+
 async function doUpdate() {
   if (!updateInfo.value?.bundleUrl) return
   updating.value = true
@@ -310,6 +321,7 @@ onMounted(() => {
     })
     .finally(() => refreshPlugins())
   loadCategories()
+  scheduleUpdateChecks()
   window.addEventListener('click', onDocClick)
   window.addEventListener('keydown', onKeyShortcut)
 })
@@ -332,6 +344,9 @@ function onKeyShortcut(e: KeyboardEvent) {
 
 onUnmounted(() => {
   socket?.close()
+  if (updateTimer !== undefined) clearInterval(updateTimer)
+  document.removeEventListener('visibilitychange', onVisibilityChanged)
+  window.removeEventListener('focus', checkUpdate)
   window.removeEventListener('click', onDocClick)
   window.removeEventListener('keydown', onKeyShortcut)
 })
