@@ -7,6 +7,8 @@ export interface UpdateInfo {
   currentVersion: string
   latest: string
   hasUpdate: boolean
+  /** 本次更新类型：'hot'=仅热更新（网页资源）/ 'hard'=需下载安装包重装 */
+  updateKind?: 'hot' | 'hard'
   bundleUrl: string | null
   /** 硬更新安装包地址（有值 = 可下载完整安装包） */
   installerUrl?: string | null
@@ -78,6 +80,65 @@ export async function downloadWithProgress(
 /** 新开窗口/标签打开下载地址（Tauri/Capacitor 会交由系统浏览器处理，用户可下载安装包） */
 export function openInstallerUrl(url: string): void {
   window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+/** 相对地址补全 API 前缀；绝对地址（http/https）原样返回 */
+function resolveUrl(u: string): string {
+  return /^https?:\/\//i.test(u) ? u : apiUrl(u)
+}
+
+/** 应用绝对/相对地址 */
+export function toFullUrl(u: string): string {
+  return resolveUrl(u)
+}
+
+export interface InstallerResult {
+  launched: boolean
+  platform: Platform
+  url: string
+}
+
+// 硬更新：自动下载安装包并唤起系统安装（Tauri 启动安装器 / Capacitor 弹系统安装器；失败或 web 降级为打开下载页）
+export async function applyInstallerUpdate(
+  info: UpdateInfo,
+): Promise<InstallerResult> {
+  const platform = detectPlatform()
+  const url = resolveUrl(info.installerUrl ?? '')
+  if (!url) return { launched: false, platform, url }
+
+  if (platform === 'tauri') {
+    const w = window as any
+    if (w.__TAURI_INTERNALS__?.invoke) {
+      try {
+        await w.__TAURI_INTERNALS__.invoke('install_update', { url })
+        return { launched: true, platform, url }
+      } catch {
+        openInstallerUrl(url)
+        return { launched: false, platform, url }
+      }
+    }
+    openInstallerUrl(url)
+    return { launched: false, platform, url }
+  }
+
+  if (platform === 'capacitor') {
+    const w = window as any
+    if (w.Capacitor?.Plugins?.WebUpdate) {
+      try {
+        await w.Capacitor.Plugins.WebUpdate.installUpdate({ url })
+        return { launched: true, platform, url }
+      } catch {
+        openInstallerUrl(url)
+        return { launched: false, platform, url }
+      }
+    }
+    openInstallerUrl(url)
+    return { launched: false, platform, url }
+  }
+
+  // web：无安装器，打开下载
+  openInstallerUrl(url)
+  return { launched: false, platform, url }
 }
 
 export interface ApplyResult {

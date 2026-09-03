@@ -15,6 +15,7 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
       UPDATE_INSTALLER_URL_TAURI: ${UPDATE_INSTALLER_URL_TAURI:-}
       UPDATE_INSTALLER_URL_ANDROID: ${UPDATE_INSTALLER_URL_ANDROID:-}
+      UPDATE_KIND: ${UPDATE_KIND:-hot}
     volumes:
       - ikit-data:/app/packages/server/data
     restart: unless-stopped

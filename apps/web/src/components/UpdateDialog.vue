@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { applyUpdate, openInstallerUrl, type UpdateInfo } from '../lib/update'
+import {
+  applyUpdate,
+  applyInstallerUpdate,
+  detectPlatform,
+  type UpdateInfo,
+} from '../lib/update'
 
 const props = defineProps<{ info: UpdateInfo }>()
 const emit = defineEmits<{
@@ -8,25 +13,24 @@ const emit = defineEmits<{
   (e: 'applied'): void
 }>()
 
-type Phase = 'confirm' | 'downloading' | 'done' | 'error'
+type Phase = 'confirm' | 'working' | 'done' | 'error'
 
 const phase = ref<Phase>('confirm')
-const pct = ref(0)
 const status = ref('')
 const error = ref('')
 
-// 是否有热更新通道（web 分发包）与硬更新通道（完整安装包）
-const hasHot = computed(() => !!props.info.bundleUrl)
-const hasHard = computed(() => !!props.info.installerUrl)
+// 按发布判定类型（服务端 updateKind）决定本弹窗只走哪一条通道，不让用户选择
+const isHard = computed(
+  () => props.info.updateKind === 'hard' && detectPlatform() !== 'web',
+)
 
 async function startHot() {
-  phase.value = 'downloading'
-  pct.value = 0
+  phase.value = 'working'
   status.value = '正在下载更新包…'
   error.value = ''
   try {
-    const r = await applyUpdate(props.info, (p) => {
-      pct.value = p
+    const r = await applyUpdate(props.info, (pct) => {
+      status.value = `正在下载更新包… ${pct}%`
     })
     if (r.applied) {
       phase.value = 'done'
@@ -34,7 +38,7 @@ async function startHot() {
       emit('applied')
     } else {
       phase.value = 'error'
-      error.value = '热更新通道不可用，请改用「下载完整安装包」更新。'
+      error.value = '热更新不可用，请稍后重试或到下载页获取完整安装包。'
     }
   } catch (e: any) {
     phase.value = 'error'
@@ -42,12 +46,24 @@ async function startHot() {
   }
 }
 
-function startInstaller() {
-  if (props.info.installerUrl) {
-    openInstallerUrl(props.info.installerUrl)
-    phase.value = 'done'
-    status.value = '已打开下载页，请下载并运行安装包完成更新。'
-    emit('applied')
+async function startInstaller() {
+  phase.value = 'working'
+  status.value = '正在下载安装包并准备安装…'
+  error.value = ''
+  try {
+    const r = await applyInstallerUpdate(props.info)
+    if (r.launched) {
+      phase.value = 'done'
+      status.value = '已启动安装程序，请在弹出的安装向导中完成更新。'
+      emit('applied')
+    } else {
+      phase.value = 'done'
+      status.value = '已打开下载页，请下载并运行安装包完成更新。'
+      emit('applied')
+    }
+  } catch (e: any) {
+    phase.value = 'error'
+    error.value = e?.message || '安装包下载失败'
   }
 }
 </script>
@@ -57,51 +73,36 @@ function startInstaller() {
     <div class="upd-modal">
       <h3>🔄 软件更新</h3>
 
-      <!-- 确认 / 选择更新方式 -->
+      <!-- 确认（单通道，按服务端判定类型展示） -->
       <template v-if="phase === 'confirm'">
-        <div class="upd-info">
-          <p class="upd-ver">发现新版本 <b>v{{ info.latest }}</b>（当前 v{{ info.currentVersion }}）</p>
-        </div>
-        <template v-if="hasHot && hasHard">
-          <p class="upd-note">请选择更新方式：</p>
+        <p class="upd-ver">
+          发现新版本 <b>v{{ info.latest }}</b>（当前 v{{ info.currentVersion }}）
+        </p>
+        <template v-if="isHard">
+          <p class="upd-note">本次为<b>完整安装包更新</b>：将自动下载安装包并弹出安装提示。</p>
           <div class="upd-actions col">
-            <button class="upd-btn" @click="startHot">🚀 热更新（免重装，推荐）</button>
-            <button class="upd-btn outline" @click="startInstaller">📦 下载完整安装包</button>
-            <button class="upd-btn ghost" @click="emit('close')">取消</button>
-          </div>
-        </template>
-        <template v-else-if="hasHot">
-          <p class="upd-note">本次为<b>热更新</b>：下载最新资源后自动生效，无需重装。</p>
-          <div class="upd-actions col">
-            <button class="upd-btn" @click="startHot">确认热更新</button>
-            <button class="upd-btn ghost" @click="emit('close')">取消</button>
-          </div>
-        </template>
-        <template v-else-if="hasHard">
-          <p class="upd-note">本次为<b>硬更新</b>：需下载安装包后重新安装。</p>
-          <div class="upd-actions col">
-            <button class="upd-btn" @click="startInstaller">下载安装包</button>
+            <button class="upd-btn" @click="startInstaller">确认更新</button>
             <button class="upd-btn ghost" @click="emit('close')">取消</button>
           </div>
         </template>
         <template v-else>
-          <p class="upd-status bad">该版本无可用更新通道。</p>
+          <p class="upd-note">本次为<b>热更新</b>：下载最新资源后自动生效，无需重装。</p>
           <div class="upd-actions col">
-            <button class="upd-btn ghost" @click="emit('close')">关闭</button>
+            <button class="upd-btn" @click="startHot">确认更新</button>
+            <button class="upd-btn ghost" @click="emit('close')">取消</button>
           </div>
         </template>
       </template>
 
-      <!-- 下载进度（热更新） -->
-      <template v-else-if="phase === 'downloading'">
-        <div class="upd-progress">
-          <div class="upd-bar"><i :style="{ width: pct + '%' }" /></div>
-          <span class="upd-pct">{{ pct }}%</span>
-        </div>
+      <!-- 处理中 -->
+      <template v-else-if="phase === 'working'">
         <p class="upd-status">{{ status }}</p>
+        <div class="upd-actions col">
+          <button class="upd-btn ghost" :disabled="true">处理中…</button>
+        </div>
       </template>
 
-      <!-- 完成 / 已打开下载页 -->
+      <!-- 完成 -->
       <template v-else-if="phase === 'done'">
         <p class="upd-status">{{ status }}</p>
         <div class="upd-actions col">
@@ -143,12 +144,8 @@ function startInstaller() {
   border: 1px solid var(--primary); background: var(--primary); color: #fff;
   border-radius: 8px; padding: 9px 18px; font-size: 14px; cursor: pointer; font-family: inherit;
 }
-.upd-btn.outline { background: transparent; color: var(--primary-dark); }
 .upd-btn.ghost { border-color: var(--border); background: var(--panel); color: var(--text); }
-.upd-progress { display: flex; align-items: center; gap: 10px; margin: 6px 0 10px; }
-.upd-bar { flex: 1; height: 10px; background: var(--border); border-radius: 999px; overflow: hidden; }
-.upd-bar i { display: block; height: 100%; background: var(--primary); border-radius: 999px; transition: width 0.2s ease; }
-.upd-pct { font-size: 13px; font-weight: 600; min-width: 40px; text-align: right; color: var(--primary-dark); }
+.upd-btn:disabled { opacity: 0.6; cursor: default; }
 .upd-status { margin: 0; font-size: 13px; color: var(--text); }
 .upd-status.bad { color: var(--danger); }
 </style>

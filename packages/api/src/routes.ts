@@ -29,7 +29,7 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   app.get('/api/update/manifest', async (req) => {
     const serverVersion = meta.version ?? '0.1.0'
     if (!meta.staticRoot) {
-      return { currentVersion: serverVersion, latest: serverVersion, hasUpdate: false, bundleUrl: null, installerUrl: null }
+      return { currentVersion: serverVersion, latest: serverVersion, hasUpdate: false, updateKind: 'hot', bundleUrl: null, installerUrl: null }
     }
     try {
       const manifestPath = path.join(meta.staticRoot, 'web-manifest.json')
@@ -53,10 +53,15 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
       }
       const installerUrl =
         installerByPlatform[platform] ?? m.installerUrl ?? process.env.UPDATE_INSTALLER_URL ?? null
+      // 本次发布的更新类型：'hot'=仅需热更新（网页资源）；'hard'=需下载安装包重装（原生代码变更）。
+      // web 无安装包概念一律按热更新；tauri/capacitor 由发布时环境变量 UPDATE_KIND 决定（默认 hot）
+      const updateKind =
+        platform === 'web' ? 'hot' : process.env.UPDATE_KIND === 'hard' ? 'hard' : 'hot'
       return {
         currentVersion: client ? effectiveCurrent : serverVersion,
         latest,
         hasUpdate,
+        updateKind,
         // 分发包托管在 /update/<version>/<bundle>
         bundleUrl: hasUpdate && m.bundle ? `/update/${latest}/${m.bundle}` : null,
         installerUrl,
@@ -64,7 +69,7 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
       }
     } catch {
       // 无 manifest（如开发模式）：视为已最新
-      return { currentVersion: serverVersion, latest: serverVersion, hasUpdate: false, bundleUrl: null, installerUrl: null }
+      return { currentVersion: serverVersion, latest: serverVersion, hasUpdate: false, updateKind: 'hot', bundleUrl: null, installerUrl: null }
     }
   })
 

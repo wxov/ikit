@@ -1,11 +1,16 @@
 package io.ikit.app;
 
+import android.content.Intent;
+import android.net.Uri;
+
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.WebViewLocalServer;
 import com.getcapacitor.annotation.CapacitorPlugin;
+
+import androidx.core.content.FileProvider;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
@@ -90,6 +95,50 @@ public class WebUpdatePlugin extends Plugin {
         File dir = new File(getWebUpdateDir(), current);
         if (dir.exists()) hostFiles(dir);
         call.resolve(ret);
+    }
+
+    /** 硬更新：下载 APK → 弹系统安装器（自动安装提示） */
+    @PluginMethod
+    public void installUpdate(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null || url.isEmpty()) {
+            call.reject("url is required");
+            return;
+        }
+        try {
+            File dir = new File(getContext().getFilesDir(), "updates");
+            dir.mkdirs();
+            String rawName = url.substring(url.lastIndexOf('/') + 1);
+            if (rawName.isEmpty() || rawName.contains("..")) rawName = "update.apk";
+            File apk = new File(dir, rawName);
+
+            URL u = new URL(url);
+            HttpURLConnection conn = (HttpURLConnection) u.openConnection();
+            conn.setConnectTimeout(30000);
+            conn.setReadTimeout(30000);
+            if (conn.getResponseCode() != 200) {
+                call.reject("download failed: HTTP " + conn.getResponseCode());
+                return;
+            }
+            try (BufferedInputStream in = new BufferedInputStream(conn.getInputStream());
+                 FileOutputStream out = new FileOutputStream(apk)) {
+                byte[] buf = new byte[8192];
+                int len;
+                while ((len = in.read(buf)) > 0) out.write(buf, 0, len);
+            }
+
+            // 用 FileProvider 提供 content:// URI 唤起系统安装器（需用户允许"安装未知应用"）
+            Uri uri = FileProvider.getUriForFile(
+                    getContext(), getContext().getPackageName() + ".fileprovider", apk);
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(uri, "application/vnd.android.package-archive");
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("installUpdate error: " + e.getMessage());
+        }
     }
 
     @PluginMethod

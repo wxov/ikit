@@ -84,6 +84,55 @@ async fn apply_web_update(app: AppHandle, url: String) -> Result<String, String>
     Ok(version)
 }
 
+/// Tauri command: install_update(url) —— 下载完整安装包（.exe）→ 写入 app data/updates → 启动安装器（自动弹出安装向导）
+#[tauri::command]
+async fn install_update(app: AppHandle, url: String) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("download failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("download failed: HTTP {}", resp.status()));
+    }
+    let bytes = resp.bytes().await.map_err(|e| format!("read failed: {e}"))?;
+
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("no app data dir: {e}"))?
+        .join("updates");
+    let _ = fs::create_dir_all(&dir);
+
+    // 取 URL 末段作为文件名并清洗（防路径穿越/非法字符）
+    let raw_name = url.rsplit('/').next().unwrap_or("i-kit-setup.exe").to_string();
+    let cleaned: String = raw_name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '.' || *c == '-' || *c == '_')
+        .collect();
+    let filename = if cleaned.is_empty() {
+        "i-kit-setup.exe".to_string()
+    } else {
+        cleaned
+    };
+    let path = dir.join(filename);
+    fs::write(&path, bytes).map_err(|e| format!("write failed: {e}"))?;
+
+    // 启动安装器：Windows 直接运行 NSIS 安装包（安装向导接管）；其他平台用系统默认打开
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new(&path)
+            .spawn()
+            .map_err(|e| format!("launch failed: {e}"))?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = std::process::Command::new("open").arg(&path).spawn();
+    }
+    Ok(path.to_string_lossy().to_string())
+}
+
 /// 从 URL 推断版本号
 fn infer_version(url: &str) -> String {
     let base = url.rsplit('/').next().unwrap_or("").to_string();
@@ -119,7 +168,11 @@ fn get_current_version(app: AppHandle) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![apply_web_update, get_current_version])
+        .invoke_handler(tauri::generate_handler![
+            apply_web_update,
+            get_current_version,
+            install_update
+        ])
         .register_uri_scheme_protocol("webupdate", |ctx, request| {
             let handle = ctx.app_handle();
             let current = current_version(handle);
