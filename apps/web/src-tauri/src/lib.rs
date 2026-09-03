@@ -133,6 +133,101 @@ async fn install_update(app: AppHandle, url: String) -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
+/// 桌面本地工具：执行白名单命令（无 shell，按空白分词，防注入）
+#[tauri::command]
+async fn exec_command(command: String) -> Result<String, String> {
+    let mut parts = command.split_whitespace();
+    let cmd = parts
+        .next()
+        .ok_or_else(|| "empty command".to_string())?
+        .to_lowercase();
+    const ALLOWED: &[&str] = &[
+        "hostname", "whoami", "ipconfig", "systeminfo", "tasklist", "ping",
+        "nslookup", "where", "tree", "getmac", "netstat",
+    ];
+    if !ALLOWED.contains(&cmd.as_str()) {
+        return Err(format!("command not allowed: {cmd}"));
+    }
+    let args: Vec<&str> = parts.collect();
+    let out = std::process::Command::new(cmd)
+        .args(&args)
+        .output()
+        .map_err(|e| format!("exec failed: {e}"))?;
+    let mut text = String::new();
+    if !out.stdout.is_empty() {
+        text.push_str(&String::from_utf8_lossy(&out.stdout));
+    }
+    if !out.stderr.is_empty() {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(&String::from_utf8_lossy(&out.stderr));
+    }
+    if text.is_empty() {
+        text = "(no output)".to_string();
+    }
+    Ok(text)
+}
+
+/// 本地工具受控根目录：app data / agent-workspace
+fn workspace_dir(app: &AppHandle) -> PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("no app data dir")
+        .join("agent-workspace")
+}
+
+/// 词法规范化路径（解析 . 与 ..，不触盘）
+fn normalize(p: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for part in p.components() {
+        match part {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// 将用户给的相对路径解析到受控目录内；绝对路径或越界一律拒绝
+fn resolve_workspace_path(app: &AppHandle, input: &str) -> Result<PathBuf, String> {
+    let base = workspace_dir(app);
+    let p = PathBuf::from(input);
+    if p.is_absolute() {
+        return Err("absolute paths are not allowed".to_string());
+    }
+    let norm = normalize(&base.join(&p));
+    if !norm.starts_with(&base) {
+        return Err("path escapes workspace".to_string());
+    }
+    Ok(norm)
+}
+
+/// 桌面本地工具：读取受控目录内文本文件（限制 2MB）
+#[tauri::command]
+async fn read_local_file(app: AppHandle, path: String) -> Result<String, String> {
+    let p = resolve_workspace_path(&app, &path)?;
+    let meta = fs::metadata(&p).map_err(|e| format!("read failed: {e}"))?;
+    if meta.len() > 2 * 1024 * 1024 {
+        return Err("file too large (>2MB)".to_string());
+    }
+    let bytes = fs::read(&p).map_err(|e| format!("read failed: {e}"))?;
+    Ok(String::from_utf8_lossy(&bytes).to_string())
+}
+
+/// 桌面本地工具：写入受控目录内文本文件（自动创建父目录）
+#[tauri::command]
+async fn write_local_file(app: AppHandle, path: String, content: String) -> Result<(), String> {
+    let p = resolve_workspace_path(&app, &path)?;
+    if let Some(parent) = p.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("write failed: {e}"))?;
+    }
+    fs::write(&p, content).map_err(|e| format!("write failed: {e}"))
+}
+
 /// 从 URL 推断版本号
 fn infer_version(url: &str) -> String {
     let base = url.rsplit('/').next().unwrap_or("").to_string();
@@ -171,7 +266,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             apply_web_update,
             get_current_version,
-            install_update
+            install_update,
+            exec_command,
+            read_local_file,
+            write_local_file
         ])
         .register_uri_scheme_protocol("webupdate", |ctx, request| {
             let handle = ctx.app_handle();

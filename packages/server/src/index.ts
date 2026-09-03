@@ -84,6 +84,9 @@ async function main() {
     storeData: {
       dataDir: './data',
     },
+    agent: {
+      dataDir: './data',
+    },
     llm: {
       apiBase: process.env.LLM_API_BASE ?? 'https://api.deepseek.com',
       apiKey: process.env.LLM_API_KEY ?? '',

@@ -150,3 +150,9 @@ export default { name, inject, apply, Config }
 - 用户 `User.groupIds`：可多组归属，权限取并集；注册用户恒保留 `user` 组；`admin` 恒有全部权限
 - 插件 `PluginRecord.visibleGroups`：按用户组可见（替代原 `visibility` 布尔）
 - 文章可见性判定：`admin` 恒可见；`public` 全员、`login` 登录、`groups` 指定组、`private` 仅站主
+
+AI Agent（节点/任务/本地工具）：
+- 节点 `AgentNode`：`desktop`（Tauri 桌面内嵌本地 agent）/ `server`；`ownerId` 归属用户；心跳判定在线
+- 任务 `AgentTask`：移动/Web 派发给指定节点，节点轮询执行并回传；仅能向自己名下节点派发（`ownerId` 校验）
+- 桌面本地工具（Tauri 原生命令）：`exec_command`（白名单命令、无 shell）、`read_local_file` / `write_local_file`（仅限 app-data 下 `agent-workspace` 目录，越界拒绝）
+- 节点本地循环：`POST /api/llm/chat-stream`（登录鉴权，原始 LLM 流式）+ `POST /api/agent/tools/:name/run`（登录鉴权，执行服务端工具）

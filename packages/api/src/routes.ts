@@ -700,6 +700,173 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     tools: ctx.agent.listTools(),
   }))
 
+  // 执行一个服务端工具（节点本地 agent 循环复用服务端工具时调用；登录鉴权）
+  app.post('/api/agent/tools/:name/run', (req, reply) =>
+    requireUser(req, reply, async () => {
+      const name = (req.params as { name: string }).name
+      const body = req.body as { args?: Record<string, unknown> }
+      return { result: await ctx.agent.runTool(name, body?.args ?? {}) }
+    }),
+  )
+
+  // ---- Agent 会话管理（多会话 + 持久化 + 三端共享） ----
+  app.get('/api/agent/sessions', async () => ({
+    sessions: await ctx.agent.listSessions(),
+  }))
+  app.post('/api/agent/sessions', async (req, reply) => {
+    const body = req.body as { title?: string }
+    const session = await ctx.agent.createSession(body?.title)
+    return reply.code(201).send({ session, sessions: await ctx.agent.listSessions() })
+  })
+  app.patch('/api/agent/sessions/:id', async (req, reply) => {
+    const id = (req.params as { id: string }).id
+    const body = req.body as { title?: string }
+    return { sessions: await ctx.agent.renameSession(id, body?.title ?? '') }
+  })
+  app.delete('/api/agent/sessions/:id', async (req) => {
+    const id = (req.params as { id: string }).id
+    return { sessions: await ctx.agent.deleteSession(id) }
+  })
+  app.get('/api/agent/sessions/:id/messages', async (req) => {
+    const id = (req.params as { id: string }).id
+    return { messages: await ctx.agent.listMessages(id) }
+  })
+
+  // ---- Agent 节点（桌面端本地 agent 运行时）注册/发现/心跳 ----
+  app.get('/api/agent/nodes', async () => {
+    const now = Date.now()
+    const nodes = (await ctx.agent.listNodes()).map((n) => ({
+      ...n,
+      online: now - new Date(n.lastSeenAt).getTime() < 30000,
+    }))
+    return { nodes }
+  })
+  app.post('/api/agent/nodes/register', (req, reply) =>
+    requireUser(req, reply, async (user) => {
+      const body = req.body as { id?: string; name?: string }
+      if (!body?.id?.trim()) return reply.code(400).send({ error: 'id is required' })
+      const node = await ctx.agent.registerNode({
+        id: body.id.trim(),
+        type: 'desktop',
+        name: body.name?.trim() || '桌面端',
+        ownerId: user.id,
+      })
+      return reply.code(201).send({ node })
+    }),
+  )
+  app.post('/api/agent/nodes/:id/heartbeat', async (req) => {
+    const id = (req.params as { id: string }).id
+    return { ok: await ctx.agent.heartbeat(id) }
+  })
+  app.delete('/api/agent/nodes/:id', async (req) => {
+    const id = (req.params as { id: string }).id
+    return { nodes: await ctx.agent.unregisterNode(id) }
+  })
+
+  // ---- Agent 远程任务：移动/Web 派发给指定节点，节点轮询执行并回传 ----
+  app.post('/api/agent/tasks', (req, reply) =>
+    requireUser(req, reply, async (user) => {
+      const body = req.body as { nodeId?: string; message?: string }
+      if (!body?.nodeId?.trim() || !body?.message?.trim()) {
+        return reply.code(400).send({ error: 'nodeId and message are required' })
+      }
+      const nodeId = body.nodeId.trim()
+      const node = (await ctx.agent.listNodes()).find((n) => n.id === nodeId)
+      if (!node) return reply.code(404).send({ error: 'node not found' })
+      // 只能向自己名下的节点派任务（server 节点无 ownerId，放开）
+      if (node.ownerId && node.ownerId !== user.id) {
+        return reply.code(403).send({ error: '不能向他人名下的节点派任务' })
+      }
+      const task = await ctx.agent.createTask({
+        nodeId,
+        ownerId: user.id,
+        message: body.message.trim(),
+      })
+      return reply.code(201).send({ task })
+    }),
+  )
+  app.get('/api/agent/nodes/:id/tasks', async (req) => {
+    const id = (req.params as { id: string }).id
+    return { tasks: await ctx.agent.listPendingTasks(id) }
+  })
+  app.get('/api/agent/tasks/:id', async (req) => {
+    const id = (req.params as { id: string }).id
+    const task = await ctx.agent.getTask(id)
+    if (!task) return { task: null }
+    return { task }
+  })
+  app.post('/api/agent/tasks/:id/run', async (req, reply) => {
+    const id = (req.params as { id: string }).id
+    const task = await ctx.agent.getTask(id)
+    if (!task) return reply.code(404).send({ error: 'task not found' })
+    if (task.status === 'done' || task.status === 'error') return { task }
+    let answer = ''
+    const steps: Array<{ toolName: string; toolArgs: Record<string, unknown>; toolResult: string }> = []
+    try {
+      for await (const ev of ctx.agent.runStream(task.message, [])) {
+        if (ev.type === 'delta') answer += ev.content
+        else if (ev.type === 'tool') {
+          steps.push({ toolName: ev.toolName, toolArgs: ev.toolArgs, toolResult: ev.toolResult })
+        }
+      }
+      return { task: await ctx.agent.completeTask(id, answer, steps) }
+    } catch (e) {
+      return {
+        task: await ctx.agent.completeTask(
+          id,
+          '',
+          undefined,
+          e instanceof Error ? e.message : String(e),
+        ),
+      }
+    }
+  })
+  app.post('/api/agent/tasks/:id/complete', async (req, reply) => {
+    const id = (req.params as { id: string }).id
+    const body = req.body as { result?: string; error?: string; steps?: Array<{ toolName: string; toolArgs: Record<string, unknown>; toolResult: string }> }
+    const task = await ctx.agent.completeTask(id, body?.result ?? '', body?.steps, body?.error)
+    if (!task) return reply.code(404).send({ error: 'task not found' })
+    return { task }
+  })
+
+  // Agent 会话流式输出（SSE）：在指定会话内对话并持久化
+  app.post('/api/agent/sessions/:id/chat-stream', async (req, reply) => {
+    const id = (req.params as { id: string }).id
+    const body = req.body as { message?: string }
+    if (!body?.message?.trim()) {
+      return reply.code(400).send({ error: 'message is required' })
+    }
+    // 持久化用户消息，并用之前的消息作为历史
+    await ctx.agent.appendMessage(id, { role: 'user', content: body.message })
+    const fullHistory = await ctx.agent.historyOf(id)
+    const priorHistory = fullHistory.slice(0, -1)
+
+    const raw = reply.raw
+    raw.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+    let assistantContent = ''
+    const steps: Array<{ toolName: string; toolArgs: Record<string, unknown>; toolResult: string }> = []
+    try {
+      for await (const ev of ctx.agent.runStream(body.message, priorHistory)) {
+        if (ev.type === 'delta') assistantContent += ev.content
+        else if (ev.type === 'tool') {
+          steps.push({ toolName: ev.toolName, toolArgs: ev.toolArgs, toolResult: ev.toolResult })
+        }
+        raw.write(`data: ${JSON.stringify(ev)}\n\n`)
+      }
+      await ctx.agent.appendMessage(id, { role: 'assistant', content: assistantContent, steps })
+    } catch (e) {
+      raw.write(
+        `data: ${JSON.stringify({ type: 'error', error: e instanceof Error ? e.message : String(e) })}\n\n`,
+      )
+    }
+    raw.end()
+  })
+
   // Agent 流式输出（SSE）
   app.post('/api/agent/chat-stream', async (req, reply) => {
     const body = req.body as { message?: string; history?: ChatMessage[] }
@@ -724,4 +891,43 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     }
     raw.end()
   })
+
+  // ---- LLM 原始流式（登录鉴权）：桌面节点本地 agent 循环用它自行驱动 function-calling ----
+  app.post('/api/llm/chat-stream', (req, reply) =>
+    requireUser(req, reply, async () => {
+      const body = req.body as {
+        messages?: ChatMessage[]
+        tools?: Array<{
+          type: 'function'
+          function: { name: string; description: string; parameters: Record<string, unknown> }
+        }>
+        temperature?: number
+        maxTokens?: number
+      }
+      if (!Array.isArray(body?.messages) || !body.messages.length) {
+        return reply.code(400).send({ error: 'messages is required' })
+      }
+      const raw = reply.raw
+      raw.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      })
+      try {
+        for await (const ev of ctx.llm.chatStream(body.messages, {
+          tools: body.tools,
+          temperature: body.temperature,
+          maxTokens: body.maxTokens,
+        })) {
+          raw.write(`data: ${JSON.stringify(ev)}\n\n`)
+        }
+      } catch (e) {
+        raw.write(
+          `data: ${JSON.stringify({ type: 'error', error: e instanceof Error ? e.message : String(e) })}\n\n`,
+        )
+      }
+      raw.end()
+    }),
+  )
 }

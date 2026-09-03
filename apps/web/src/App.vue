@@ -7,6 +7,7 @@ import {
   type UpdateInfo,
 } from './lib/update'
 import { getToken, setToken, logout, currentUser, type PublicUser } from './lib/auth'
+import { startDesktopNode } from './lib/agentNode'
 import type { PluginRecord, PluginRole, VisiblePlugins } from './lib/plugins'
 import SystemPanel from './components/SystemPanel.vue'
 import AgentPanel from './components/AgentPanel.vue'
@@ -78,6 +79,17 @@ const categoryPaths = computed<string[]>(() => {
 
 let authToken = ''
 
+// 桌面端节点：登录后注册并心跳（Tauri 环境才生效）
+let stopNode: (() => void) | null = null
+function ensureNode() {
+  if (stopNode) return
+  stopNode = startDesktopNode()
+}
+function stopDesktopNode() {
+  stopNode?.()
+  stopNode = null
+}
+
 async function loadCategories() {
   try {
     const r = await api<{ categories: import('./lib/api').CategoryNode[] }>('/api/knowledge/categories')
@@ -116,12 +128,14 @@ function onAuthed(u: { role: string }) {
   authToken = getToken() ?? ''
   role.value = (u.role as PluginRole) || 'guest'
   showAuth.value = false
+  ensureNode()
   refreshPlugins()
 }
 
 function onProfileUpdated(u: import('./lib/auth').PublicUser) {
   user.value = u
   role.value = (u.role as PluginRole) || 'guest'
+  ensureNode()
   refreshPlugins()
 }
 
@@ -135,6 +149,7 @@ async function doLogout() {
   user.value = null
   authToken = ''
   role.value = 'guest'
+  stopDesktopNode()
   if (tab.value === 'manager' || tab.value === 'users') tab.value = 'system'
   refreshPlugins()
 }
@@ -306,6 +321,7 @@ onMounted(() => {
     .then((u) => {
       user.value = u
       role.value = u ? (u.role as PluginRole) : 'guest'
+      ensureNode()
     })
     .catch(() => {
       user.value = null
@@ -336,6 +352,7 @@ function onKeyShortcut(e: KeyboardEvent) {
 
 onUnmounted(() => {
   socket?.close()
+  stopDesktopNode()
   if (updateTimer !== undefined) clearInterval(updateTimer)
   document.removeEventListener('visibilitychange', onVisibilityChanged)
   window.removeEventListener('focus', checkUpdate)
