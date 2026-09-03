@@ -8,7 +8,7 @@ export interface UpdateInfo {
   latest: string
   hasUpdate: boolean
   bundleUrl: string | null
-  /** 硬更新安装包地址（有值 = 需下载安装包后安装） */
+  /** 硬更新安装包地址（有值 = 可下载完整安装包） */
   installerUrl?: string | null
   buildTime: string | null
 }
@@ -29,7 +29,10 @@ export function detectPlatform(): Platform {
 
 export async function fetchUpdateManifest(): Promise<UpdateInfo | null> {
   try {
-    const res = await fetch(apiUrl(`/api/update/manifest?client=${APP_VERSION}`), { cache: 'no-store' })
+    const res = await fetch(
+      apiUrl(`/api/update/manifest?client=${APP_VERSION}&platform=${detectPlatform()}`),
+      { cache: 'no-store' },
+    )
     if (!res.ok) return null
     return (await res.json()) as UpdateInfo
   } catch {
@@ -72,59 +75,34 @@ export async function downloadWithProgress(
   return new Blob(chunks)
 }
 
-/** 从 URL 推断文件名 */
-export function filenameFromUrl(url: string): string {
-  const base = url.split('?')[0].split('/').pop() || ''
-  return base || 'i-kit-update'
-}
-
-/** 触发浏览器保存 Blob 为文件 */
-export function saveBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  setTimeout(() => URL.revokeObjectURL(url), 5000)
+/** 新开窗口/标签打开下载地址（Tauri/Capacitor 会交由系统浏览器处理，用户可下载安装包） */
+export function openInstallerUrl(url: string): void {
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 export interface ApplyResult {
   applied: boolean
   platform: Platform
   url: string
-  /** 是否硬更新（下载安装包而非热更新） */
-  hardUpdate: boolean
-  /** 硬更新下载得到的安装包 Blob */
-  installerBlob?: Blob
 }
 
-// 应用更新
-// - 硬更新：下载安装包（带进度）→ 由调用方提示安装
-// - web：下载分发包（带进度）→ 刷新加载新资源
+// 热更新：下载分发包（带进度）→ 应用
+// - web：下载分发包展示进度 → 刷新加载新资源
 // - tauri：调用原生命令 apply_web_update（下载+解压+重启）
-// - capacitor：调用 Capacitor 更新逻辑
+// - capacitor：调用 Capacitor WebUpdate 插件
 export async function applyUpdate(
   info: UpdateInfo,
   onProgress?: (pct: number) => void,
 ): Promise<ApplyResult> {
   const platform = detectPlatform()
-
-  // 硬更新：存在安装包地址时，下载安装包并交给调用方提示安装
-  if (info.installerUrl) {
-    const url = apiUrl(info.installerUrl)
-    const blob = await downloadWithProgress(url, onProgress)
-    return { applied: false, platform, url, hardUpdate: true, installerBlob: blob }
-  }
-
   const url = apiUrl(info.bundleUrl ?? '')
+
   if (platform === 'web') {
     // 服务端已部署新 dist：下载分发包仅用于展示实时进度，完成后刷新即热更新
     if (url) await downloadWithProgress(url, onProgress)
     else onProgress?.(100)
     location.reload()
-    return { applied: true, platform, url, hardUpdate: false }
+    return { applied: true, platform, url }
   }
 
   if (platform === 'tauri') {
@@ -136,13 +114,13 @@ export async function applyUpdate(
         onProgress?.(100)
         // 热更新：切到自定义 webupdate:// 协议重新加载新资源
         window.location.href = 'webupdate://localhost/index.html'
-        return { applied: true, platform, url, hardUpdate: false }
+        return { applied: true, platform, url }
       } catch {
         onProgress?.(100)
-        return { applied: false, platform, url, hardUpdate: false }
+        return { applied: false, platform, url }
       }
     }
-    return { applied: false, platform, url, hardUpdate: false }
+    return { applied: false, platform, url }
   }
 
   const w2 = window as any
@@ -150,7 +128,7 @@ export async function applyUpdate(
     onProgress?.(10)
     await w2.Capacitor.Plugins.WebUpdate.applyUpdate({ url })
     onProgress?.(100)
-    return { applied: true, platform, url, hardUpdate: false }
+    return { applied: true, platform, url }
   }
-  return { applied: false, platform, url, hardUpdate: false }
+  return { applied: false, platform, url }
 }

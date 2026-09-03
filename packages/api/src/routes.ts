@@ -44,8 +44,15 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
       const client = String((req.query as { client?: string }).client ?? '').trim()
       const effectiveCurrent = client || '0.0.0' // 未上报：视为旧版
       const hasUpdate = latest !== effectiveCurrent
-      // 硬更新安装包地址：优先 manifest，其次环境变量 UPDATE_INSTALLER_URL
-      const installerUrl = m.installerUrl ?? process.env.UPDATE_INSTALLER_URL ?? null
+      // 按平台解析硬更新安装包地址（tauri→Windows 安装包 / capacitor→Android APK / web→无）
+      const platform = String((req.query as { platform?: string }).platform ?? '').trim()
+      const installerByPlatform: Record<string, string | undefined> = {
+        tauri: process.env.UPDATE_INSTALLER_URL_TAURI,
+        capacitor: process.env.UPDATE_INSTALLER_URL_ANDROID,
+        web: process.env.UPDATE_INSTALLER_URL_WEB,
+      }
+      const installerUrl =
+        installerByPlatform[platform] ?? m.installerUrl ?? process.env.UPDATE_INSTALLER_URL ?? null
       return {
         currentVersion: client ? effectiveCurrent : serverVersion,
         latest,

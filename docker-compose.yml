@@ -13,6 +13,8 @@ services:
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       EMBEDDING_API_BASE: ${EMBEDDING_API_BASE:-https://api.siliconflow.cn/v1}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
+      UPDATE_INSTALLER_URL_TAURI: ${UPDATE_INSTALLER_URL_TAURI:-}
+      UPDATE_INSTALLER_URL_ANDROID: ${UPDATE_INSTALLER_URL_ANDROID:-}
     volumes:
       - ikit-data:/app/packages/server/data
     restart: unless-stopped
