@@ -1,6 +1,6 @@
 [package]
 name = "ikit"
-version = "0.2.3"
+version = "0.2.4"
 description = "i-kit 桌面端"
 authors = ["i-kit"]
 edition = "2021"
