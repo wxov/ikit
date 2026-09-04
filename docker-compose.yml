@@ -16,6 +16,19 @@ services:
       UPDATE_INSTALLER_URL_TAURI: ${UPDATE_INSTALLER_URL_TAURI:-}
       UPDATE_INSTALLER_URL_ANDROID: ${UPDATE_INSTALLER_URL_ANDROID:-}
       UPDATE_KIND: ${UPDATE_KIND:-hot}
+      UPDATE_INSTALLER_URL: ${UPDATE_INSTALLER_URL:-}
+      UPDATE_INSTALLER_URL_WEB: ${UPDATE_INSTALLER_URL_WEB:-}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      APP_URL: ${APP_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-0}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      PLUGIN_DIR: ${PLUGIN_DIR:-}
+      WEB_DIST: ${WEB_DIST:-}
     volumes:
       - ikit-data:/app/packages/server/data
     restart: unless-stopped

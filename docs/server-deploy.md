@@ -45,7 +45,7 @@ vim .env   # 填入 LLM_API_KEY 等
 docker compose up -d --build
 ```
 
-部署完成后访问 `http://<服务器IP>:3000`。
+部署完成后访问 `http://<服务器IP>`（默认 80 端口，`docker-compose.yml` 映射 `80:3000`）。
 
 ## 常用命令
 
@@ -74,7 +74,7 @@ docker compose up -d --build
 
 ```
 你的域名.com {
-    reverse_proxy localhost:3000
+    reverse_proxy localhost:80
 }
 ```
 
@@ -92,7 +92,7 @@ server {
     server_name 你的域名.com;
 
     location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:80;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";

@@ -23,30 +23,39 @@
 i-kit/
 ├── packages/
 │   ├── core/                  # Cordis 核心：创建 Context、注册内置插件、服务类型声明
-│   ├── api/                   # fastify API：REST 路由 + WebSocket/SSE 桥接
-│   ├── server/                # 入口：组装 core + api，启动服务
+│   ├── api/                   # fastify API：REST 路由 + WebSocket/SSE 桥接 + 静态托管
+│   ├── server/                # 入口：组装 core + api，加载 .env，启动服务
 │   └── plugins/
 │       ├── demo/              # 最小插件示例：服务注入 + 事件总线
 │       ├── llm/               # LLM 服务：chat（含 tools）/ chatStream（流式）/ embed（向量）
-│       ├── knowledge/         # 知识库插件：CRUD + 混合检索 + 分类树 + 回收站 + 批量归类
-│       └── agent/             # Agent 运行时：function-calling 循环 + 工具注册 + RAG + 流式
+│       ├── knowledge/         # 知识库：CRUD + 混合检索 + 分类 + 评论 + 可见性 + 文档树 + 回收站
+│       ├── agent/             # Agent 运行时：function-calling + 工具 + RAG + 流式 + 会话/节点/任务
+│       ├── account/           # 账号体系：登录/找回/会话/用户管理/用户组
+│       ├── plugin-registry/   # 插件注册表：内置插件 + 第三方插件包加载 + 插件商店
+│       └── store-data/        # 商店插件真实数据：统计/便签/日历/待办/天气/RSS/MD 剪贴板
+├── plugins/                   # 第三方插件包目录（plugin.json + entry 模块，PLUGIN_DIR 可配；示例 plugins/hello）
 ├── apps/
 │   └── web/                   # Web 控制台（Vue3 + Vite，响应式，三端共用）
 │       ├── src-tauri/         # Tauri 2 桌面端（Rust 壳）
 │       └── capacitor.config.ts # Capacitor 移动端配置
 ├── docs/
+│   ├── 需求功能总览.md        # 需求/功能主文档（现状事实基准 + 总索引）
 │   ├── desktop-mobile.md      # 三端互联构建指南
-│   └── server-deploy.md       # 服务器部署指南（Docker）
+│   ├── server-deploy.md       # 服务器部署指南（Docker）
+│   └── …（PRD 与各需求文档）
 ├── scripts/
-│   ├── e2e.mjs                # 基础端到端验证
+│   ├── e2e.mjs                # 基础端到端验证（过时，调用已删路由，修复列入完善阶段）
 │   ├── agent-e2e.mjs          # Agent/RAG 验证
-│   ├── import-test.mjs        # 导入验证
-│   ├── category-test.mjs      # 分类验证
+│   ├── import-test.mjs        # 导入验证（过时，调用已删路由）
+│   ├── category-test.mjs      # 分类验证（过时，调用已删路由）
 │   ├── deploy.ps1             # Windows 本地一键部署
 │   ├── deploy.sh              # Linux/macOS 本地一键部署
-│   └── deploy-server.sh       # 服务器一键部署（Docker）
+│   ├── deploy-server.sh       # 服务器一键部署（Docker）
+│   ├── update-server.ps1      # Windows 一键更新服务器
+│   ├── update-server.sh       # Linux/macOS 一键更新服务器
+│   └── build-web-update.mjs   # 热更新分发包生成
 ├── Dockerfile                 # Docker 多阶段构建
-├── docker-compose.yml         # Docker Compose 编排
+├── docker-compose.yml         # Docker Compose 编排（映射 80:3000）
 ├── .env.example               # 环境变量模板
 └── tsconfig.base.json
 ```
@@ -97,7 +106,7 @@ pnpm build:prod
 # 或手动：docker compose up -d --build
 ```
 
-部署后访问 `http://<服务器IP>:3000`。详细说明（含 HTTPS 反向代理、备份）见 [docs/server-deploy.md](docs/server-deploy.md)。
+部署后访问 `http://<服务器IP>`（默认 80 端口，`docker-compose.yml` 映射 `80:3000`）。详细说明（含 HTTPS 反向代理、备份）见 [docs/server-deploy.md](docs/server-deploy.md)。
 
 > LLM 默认指向 DeepSeek（`https://api.deepseek.com`，模型 `deepseek-chat`），任何 OpenAI 兼容接口均可通过 `LLM_API_BASE` / `LLM_MODEL` 切换。
 
@@ -126,13 +135,14 @@ export function apply(ctx: Context, config: Config) {
 
 `packages/plugins/knowledge` 提供 `ctx.knowledge` 服务，功能完整：
 
-- **条目管理**：CRUD + 批量导入（单个/多个 md 文件 + 文件夹，子目录自动映射为分类）
+- **条目管理**：创建 / 列表（分页 + 可见性过滤）/ 更新（写入版本历史）
 - **混合检索**：Fuse.js 模糊搜索 + 停用词过滤的关键词子串匹配 +（配置 embedding 时的）向量余弦相似度，三者去重融合排序
-- **树状分类**：路径式层级（如 `技术/前端`），增删改（重命名含子分类级联）、父级自动补全、计数
-- **批量归类**：勾选多篇 → 设置分类
+- **文档树**：`parentId`/`sortOrder` 层级 + 拖拽排序/移动（moveDoc / reorder）+ 置顶（`pinned`）
+- **分类**：路径式层级（如 `技术/前端`），从条目派生；添加分类（父级自动补全）+ 批量归类 + 计数
 - **回收站**：软删除 → 恢复 / 彻底删除 / 清空
-- **置顶/收藏**：`pinned` 标记 + 排序置顶优先
-- **导出**：单篇导出为 `.md`
+- **评论**：单条评论/回复 + 全站最新评论（列表过滤不可见文章）
+- **可见性**：`visibility`（公开/仅登录/指定组/仅站主）+ `visibleGroups`，支持父子递归同步与批量设置
+- **浏览计数**：`view()` 访问 +1（不可见文章不计数）
 - **持久化**：JSON（默认）/ SQLite（`node:sqlite` 零依赖，数据量大时切换，自动迁移）
 - **事件广播**：`knowledge:changed` → WebSocket 实时同步多端
 
@@ -150,14 +160,16 @@ export function apply(ctx: Context, config: Config) {
 
 - **function-calling 循环**：用户消息 → LLM → 工具调用 → 执行 → 结果回填 → LLM → … 直到产出最终回答
 - **工具注册**：`ctx.agent.registerTool({ name, description, parameters, handler })`
-- **内置工具**：`knowledge_search`（知识库 RAG 检索）、`current_time`
+- **内置工具**：`knowledge_search`（RAG 检索）、`current_time`、`web_fetch`（网页抓取）；可选 `knowledge_add`（写库，需 `enableWriteTools`）
 - **流式输出**：`runStream()` 逐 token 产出，工具调用与回答交替推送（SSE）
+- **多会话**：会话创建/重命名/删除 + 消息持久化（三端共享；会话归属/鉴权为已知缺口，见 [docs/需求功能总览.md](docs/需求功能总览.md) 模块⑤）
+- **节点与任务**：桌面节点注册/心跳/在线判定 + 远程任务派发/轮询执行/回传（仅限自己名下节点）
 
 新增一个 Agent 工具只需注册一个对象，后续机器人适配器、业务能力都可以照此扩展。
 
 ### Web 控制台
 
-- **响应式三栏**：≥1200px 三栏 / 768–1200px 双栏+抽屉 / <768px 单栏+抽屉；≥1600px 宽屏自适应
+- **响应式三栏**：≥1200px 三栏；<1200px 单栏 + 左右侧栏收为抽屉（顶栏 ☰/◫ 开关）；<768px 移动端底部 Tab；≥1600px 宽屏自适应
 - **Markdown 阅读**：markdown-it 渲染 + highlight.js 语法高亮（20+ 语言按需注册）+ 目录 TOC 跳转
 - **编辑体验**：左编辑/右预览分屏、草稿自动保存、快捷键（`/` 搜索、`N` 新建、`Ctrl+S` 保存）
 - **Agent 对话**：流式逐字输出 + Markdown 实时渲染 + 工具调用轨迹 + 停止生成
@@ -175,41 +187,137 @@ WebSocket 实时同步让三端联动（任一端的变更，其他端自动刷�
 
 ## API 一览
 
+> 鉴权：`Authorization: Bearer <token>`。标注「站主」= `requireAdmin`；「登录」= `requireUser`；未标注为公开或按可见性过滤。
+
+### 通用
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/health` | 健康检查 |
 | GET | `/api/system/info` | 应用与插件信息 |
-| GET | `/api/demo/hello?name=` | 调用 demo 插件服务 |
-| GET | `/api/agent/tools` | 列出 Agent 可用工具 |
-| POST | `/api/agent/chat` | Agent 对话（`{ message, history? }`） |
-| POST | `/api/agent/chat-stream` | Agent 流式对话（SSE） |
-| GET | `/api/knowledge/entries?limit=&offset=` | 知识库列表（分页） |
-| POST | `/api/knowledge/entries` | 创建条目 |
-| POST | `/api/knowledge/import` | 批量导入（`{ entries: [] }`） |
-| GET | `/api/knowledge/entries/:id` | 查询条目 |
-| PATCH | `/api/knowledge/entries/:id` | 更新条目 |
-| DELETE | `/api/knowledge/entries/:id` | 删除条目（软删除 → 回收站） |
-| POST | `/api/knowledge/entries/:id/toggle-pin` | 置顶/取消置顶 |
-| GET | `/api/knowledge/search?q=` | 搜索条目（混合检索） |
+| GET | `/api/update/manifest` | 热更新清单（`?client=&platform=tauri/capacitor/web`） |
+| GET | `/api/demo/hello?name=` | demo 插件服务 |
+| GET | `/api/demo/status` | demo 计数 |
+
+### 账号（auth）
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/auth/login` | 登录（`{username,password}`） |
+| POST | `/api/auth/request-reset` | 请求重置密码（`{username}`） |
+| POST | `/api/auth/reset-password` | 重置密码（`{resetToken,password}`） |
+| GET | `/api/auth/me` | 当前用户 |
+| POST | `/api/auth/logout` | 退出登录 |
+| POST | `/api/auth/profile` | 修改资料（登录） |
+| GET | `/api/auth/users` | 用户列表（站主） |
+| POST | `/api/auth/users` | 创建用户（站主） |
+| POST | `/api/auth/users/:id/disable` | 启用/禁用（站主） |
+| DELETE | `/api/auth/users/:id` | 删除用户（站主） |
+| POST | `/api/auth/users/:id/role` | 设置角色（站主） |
+| POST | `/api/auth/users/:id/groups` | 设置所属组（站主） |
+
+### 用户组（站主）
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/groups` | 组列表 |
+| POST | `/api/groups` | 创建组 |
+| POST | `/api/groups/:id/parent` | 设置父组（组包含关系） |
+| PATCH | `/api/groups/:id` | 重命名组 |
+| DELETE | `/api/groups/:id` | 删除组 |
+
+### 插件与商店
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/plugins/visible` | 当前用户可见插件 |
+| GET | `/api/plugins` | 全部插件（站主） |
+| POST | `/api/plugins/:name/enable` | 启用/禁用（站主） |
+| POST | `/api/plugins/order` | 排序（站主） |
+| POST | `/api/plugins/:name/visibility` | 按组可见性（站主） |
+| GET | `/api/plugin-store` | 商店列表 |
+| GET | `/api/plugin-store/categories` | 商店分类 |
+| POST | `/api/plugin-store/rate` | 评分/评论 |
+| POST | `/api/plugin-store/install` | 安装（站主） |
+| POST | `/api/plugin-store/:name/update` | 更新（站主） |
+| DELETE | `/api/plugin-store/:name` | 卸载（站主） |
+
+### 商店数据（plugins-data）
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/plugins-data/statistics` | 统计 |
+| GET/POST | `/api/plugins-data/notes`、`DELETE /api/plugins-data/notes/:id` | 便签（写=登录） |
+| GET/POST | `/api/plugins-data/events`、`DELETE /api/plugins-data/events/:id`、`POST /api/plugins-data/events/:id/toggle` | 日程（写=登录） |
+| GET/POST | `/api/plugins-data/todos`、`POST /api/plugins-data/todos/:id/toggle`、`DELETE /api/plugins-data/todos/:id` | 待办（写=登录） |
+| GET | `/api/plugins-data/weather?city=` | 天气 |
+| GET | `/api/plugins-data/rss?url=` | RSS |
+| GET/POST | `/api/plugins-data/md`、`DELETE /api/plugins-data/md/:id` | MD 剪贴板（写=登录） |
+
+### 知识库（knowledge）
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/knowledge/entries?limit=&offset=` | 列表（分页，按可见性） |
+| POST | `/api/knowledge/entries` | 创建（站主） |
+| PATCH | `/api/knowledge/entries/:id` | 更新（站主） |
+| POST | `/api/knowledge/entries/:id/view` | 浏览计数 +1 |
+| GET | `/api/knowledge/entries/:id/comments` | 评论列表 |
+| POST | `/api/knowledge/entries/:id/comments` | 发评论（登录） |
+| DELETE | `/api/knowledge/comments/:id` | 删评论（作者/站主） |
+| GET | `/api/knowledge/comments?limit=` | 全站最新评论 |
+| POST | `/api/knowledge/entries/:id/move` | 移动文档（站主） |
+| POST | `/api/knowledge/reorder` | 同级排序（站主） |
+| DELETE | `/api/knowledge/entries/:id` | 软删除 → 回收站（站主） |
+| POST | `/api/knowledge/entries/:id/toggle-pin` | 置顶（站主） |
+| GET | `/api/knowledge/trash` | 回收站（站主） |
+| POST | `/api/knowledge/trash/:id/restore` | 恢复（站主） |
+| DELETE | `/api/knowledge/trash/:id` | 彻底删除（站主） |
+| DELETE | `/api/knowledge/trash` | 清空（站主） |
 | GET | `/api/knowledge/categories` | 分类树 |
-| POST | `/api/knowledge/categories` | 添加分类（`{ path }`） |
-| DELETE | `/api/knowledge/categories?path=` | 删除分类（含子分类） |
-| POST | `/api/knowledge/category-rename` | 重命名分类（`{ oldPath, newPath }`） |
-| POST | `/api/knowledge/batch-category` | 批量归类（`{ ids, category }`） |
-| GET | `/api/knowledge/trash` | 回收站列表 |
-| POST | `/api/knowledge/trash/:id/restore` | 恢复条目 |
-| DELETE | `/api/knowledge/trash/:id` | 彻底删除 |
-| DELETE | `/api/knowledge/trash` | 清空回收站 |
-| WS | `/ws` | WebSocket 实时事件流 |
+| POST | `/api/knowledge/categories` | 添加分类（站主，父级自动补全） |
+| POST | `/api/knowledge/batch-category` | 批量归类（站主） |
+| PATCH | `/api/knowledge/entries/:id/visibility` | 可见性（站主） |
+| POST | `/api/knowledge/batch-visibility` | 批量可见性（站主） |
+| POST | `/api/upload` | 图片上传（站主，base64 ≤5MB）→ `/uploads/<file>` |
+
+### Agent
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/agent/tools` | 工具列表 |
+| POST | `/api/agent/tools/:name/run` | 执行服务端工具（登录） |
+| GET | `/api/agent/sessions` | 会话列表 |
+| POST | `/api/agent/sessions` | 创建会话 |
+| PATCH | `/api/agent/sessions/:id` | 重命名会话 |
+| DELETE | `/api/agent/sessions/:id` | 删除会话 |
+| GET | `/api/agent/sessions/:id/messages` | 会话消息 |
+| POST | `/api/agent/sessions/:id/chat-stream` | 会话内流式对话（SSE） |
+| POST | `/api/agent/chat-stream` | 流式对话（SSE） |
+| GET | `/api/agent/nodes` | 节点列表 |
+| POST | `/api/agent/nodes/register` | 注册节点（登录） |
+| POST | `/api/agent/nodes/:id/heartbeat` | 心跳 |
+| DELETE | `/api/agent/nodes/:id` | 注销节点 |
+| POST | `/api/agent/tasks` | 派发任务（登录，仅自己名下节点） |
+| GET | `/api/agent/nodes/:id/tasks` | 节点待办任务 |
+| GET | `/api/agent/tasks/:id` | 查询任务 |
+| POST | `/api/agent/tasks/:id/run` | 执行任务 |
+| POST | `/api/agent/tasks/:id/complete` | 回传结果 |
+
+### LLM / 实时
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/llm/chat-stream` | 原始 LLM 流式（登录，SSE） |
+| WS | `/ws` | WebSocket 实时事件流（`knowledge:changed`、`demo:greeted`） |
+
+### 静态托管（生产同源）
+| 前缀 | 说明 |
+|---|---|
+| `GET /` | 前端 dist + SPA 回退（非 `/api`、`/ws`） |
+| `GET /uploads/<file>` | 上传文件 |
+| `GET /update/<version>/<bundle>` | 热更新分发包 |
 
 ## 端到端验证
 
 ```bash
 # 启动 server 后
-node scripts/e2e.mjs          # 基础链路（REST + WS）
+# ⚠️ 过时脚本：scripts/e2e.mjs、import-test.mjs、category-test.mjs 仍调用已删除的旧路由
+#   （如 /api/knowledge/import、DELETE /api/knowledge/categories、/api/knowledge/category-rename、/api/knowledge/search 等），
+#   脚本修复已列入完善阶段，暂勿运行。
 node scripts/agent-e2e.mjs    # Agent function-calling + RAG
-node scripts/import-test.mjs  # md 导入
-node scripts/category-test.mjs # 分类树
 
 # Agent 流式对话测试（需先配置 LLM_API_KEY）
 curl -N -X POST http://localhost:3000/api/agent/chat-stream \
@@ -223,7 +331,7 @@ curl -N -X POST http://localhost:3000/api/agent/chat-stream \
 - [x] AI Agent 运行时插件（LLM 编排 + 工具调用 + RAG）
 - [x] 流式输出（SSE）+ Markdown 实时渲染 + 停止生成
 - [x] 知识库向量检索（embedding 可选接入，余弦相似度 + 关键词融合）
-- [x] 树状分类 + 批量归类 + 回收站 + 置顶 + 导出
+- [x] 树状分类 + 批量归类 + 回收站 + 置顶（单篇导出已随 18 条死路由移除）
 - [x] 响应式布局（三栏/双栏/单栏抽屉 + 宽屏适配）
 - [x] 数据量大时迁移 SQLite（JSON/SQLite 双后端，`node:sqlite` 零依赖，自动迁移）
 - [x] 桌面端（Tauri）与移动端（Capacitor），复用同一套 API + WS 实现三端互联

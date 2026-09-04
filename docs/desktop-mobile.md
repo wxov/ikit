@@ -75,7 +75,7 @@ pnpm tauri build
 
 ### 前提条件
 
-- Android：[Android Studio](https://developer.android.com/studio) + SDK + JDK 17
+- Android：[Android Studio](https://developer.android.com/studio) + SDK + JDK 17+（仓库根附带本地工具链 `jdk21/` 可直接使用）
 - iOS：Xcode（仅 macOS）
 
 ### 初始化原生工程（首次）
