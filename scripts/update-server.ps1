@@ -32,6 +32,11 @@ Write-Host "[3/3] Rebuilding and restarting..." -ForegroundColor Yellow
 ssh -i $Key -o StrictHostKeyChecking=no $Server "cd $RemoteDir && sudo docker compose up -d --build"
 if ($LASTEXITCODE -ne 0) { throw "docker rebuild failed" }
 
+Write-Host "[4/4] Syncing update artifacts (installers/bundles) into container..." -ForegroundColor Yellow
+# update/ 目录被 git 忽略，需在每次重建后把宿主机上的发布产物（安装包等）并入容器静态目录
+ssh -i $Key -o StrictHostKeyChecking=no $Server "cd $RemoteDir && sudo docker cp -a ./update/. ikit:/app/update/ 2>/dev/null || echo '  (no update dir on server, skip)'"
+if ($LASTEXITCODE -ne 0) { Write-Host "  [WARN] update artifact sync failed, continue" -ForegroundColor Yellow }
+
 Write-Host ""
 Write-Host "  [OK] Update done." -ForegroundColor Green
 Write-Host ""
