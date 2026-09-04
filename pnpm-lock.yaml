@@ -208,6 +208,9 @@ importers:
 
   packages/plugins/plugin-registry:
     dependencies:
+      adm-zip:
+        specifier: 0.6.0
+        version: 0.6.0
       cordis:
         specifier: ^3.18.1
         version: 3.18.1

@@ -6,6 +6,8 @@ import {
   installPlugin,
   updatePlugin,
   uninstallPlugin,
+  importPlugin,
+  downloadPlugin,
   ratePlugin,
   type PluginStoreItem,
 } from '../lib/plugins'
@@ -17,10 +19,25 @@ const activeCat = ref('all')
 const busy = ref('')
 const notice = ref('')
 const error = ref('')
+const importing = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
 const ratingFor = ref<PluginStoreItem | null>(null)
 const rateScore = ref(5)
 const rateComment = ref('')
 const detailFor = ref<PluginStoreItem | null>(null)
+
+function sourceLabel(p: PluginStoreItem): string {
+  if (p.source === 'remote') return '远端'
+  if (p.source === 'local') return '本地'
+  return ''
+}
+function canUpdate(p: PluginStoreItem): boolean {
+  if (p.updateAvailable !== undefined) return p.updateAvailable
+  return !!p.installedVersion && p.installedVersion !== p.version
+}
+function isThirdParty(p: PluginStoreItem): boolean {
+  return p.source === 'local' || p.source === 'remote'
+}
 
 function openDetail(p: PluginStoreItem) {
   detailFor.value = p
@@ -81,6 +98,55 @@ async function doUninstall(p: PluginStoreItem) {
   }
 }
 
+async function doExport(p: PluginStoreItem) {
+  busy.value = p.name
+  error.value = ''
+  try {
+    await downloadPlugin(p.name)
+    notice.value = `已导出「${p.title}」`
+  } catch (e: any) {
+    error.value = e.message
+  } finally {
+    busy.value = ''
+  }
+}
+
+function triggerImport() {
+  fileInput.value?.click()
+}
+
+async function onImportFile(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  // D5：仅 admin + 二次确认 + 风险提示
+  if (!confirm(`即将导入插件包「${file.name}」。\n\n风险提示：第三方插件将获得与主程序同等的系统权限，仅安装你信任的来源。\n\n继续导入？`)) return
+  if (file.size > 3 * 1024 * 1024) {
+    error.value = '插件包超过 2MB 限制'
+    return
+  }
+  importing.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader()
+      r.onload = () => resolve((r.result as string).split(',')[1] ?? (r.result as string))
+      r.onerror = () => reject(new Error('读取文件失败'))
+      r.readAsDataURL(file)
+    })
+    const r = await importPlugin(base64)
+    store.value = r.store
+    notice.value = `已导入「${file.name}」，正在刷新…`
+    location.reload()
+  } catch (e: any) {
+    error.value = e.message
+  } finally {
+    importing.value = false
+  }
+}
+
 function openRate(p: PluginStoreItem) {
   ratingFor.value = p
   rateScore.value = Math.round(p.rating ?? 5)
@@ -119,6 +185,10 @@ onMounted(load)
     </div>
     <div class="ps-tools">
       <input v-model="searchQ" class="ps-search" placeholder="搜索插件…" />
+      <button class="ps-btn import" :disabled="importing" @click="triggerImport">
+        {{ importing ? '导入中…' : '导入插件' }}
+      </button>
+      <input ref="fileInput" type="file" accept=".zip,application/zip" style="display: none" @change="onImportFile" />
     </div>
     <div class="ps-cats">
       <span
@@ -159,13 +229,15 @@ onMounted(load)
         </div>
         <div class="ps-meta">
           <span class="ps-author">{{ p.author }}</span>
+          <span v-if="sourceLabel(p)" class="ps-source" :class="p.source">{{ sourceLabel(p) }}</span>
           <span class="ps-ver">v{{ p.installed ? p.installedVersion : p.version }}</span>
         </div>
         <div class="ps-actions">
           <button v-if="!p.installed" class="ps-btn" :disabled="busy === p.name" @click="install(p)">安装</button>
           <template v-else>
-            <button v-if="p.installedVersion !== p.version" class="ps-btn" :disabled="busy === p.name" @click="doUpdate(p)">更新</button>
+            <button v-if="canUpdate(p)" class="ps-btn" :disabled="busy === p.name" @click="doUpdate(p)">更新</button>
             <button v-else class="ps-btn ok" disabled>已安装</button>
+            <button v-if="isThirdParty(p)" class="ps-btn ghost" :disabled="busy === p.name" @click="doExport(p)">导出</button>
             <button class="ps-btn danger" :disabled="busy === p.name" @click="doUninstall(p)">卸载</button>
           </template>
           <button class="ps-btn ghost" @click="openDetail(p)">详情</button>
@@ -248,8 +320,9 @@ onMounted(load)
             <button class="ps-btn" :disabled="busy === detailFor.name" @click="install(detailFor)">安装</button>
           </template>
           <template v-else>
-            <button v-if="detailFor.installedVersion !== detailFor.version" class="ps-btn" :disabled="busy === detailFor.name" @click="doUpdate(detailFor)">更新</button>
+            <button v-if="canUpdate(detailFor)" class="ps-btn" :disabled="busy === detailFor.name" @click="doUpdate(detailFor)">更新</button>
             <button v-else class="ps-btn ok" disabled>已安装</button>
+            <button v-if="isThirdParty(detailFor)" class="ps-btn ghost" :disabled="busy === detailFor.name" @click="doExport(detailFor)">导出</button>
             <button class="ps-btn danger" :disabled="busy === detailFor.name" @click="doUninstall(detailFor)">卸载</button>
           </template>
           <button class="ps-btn ghost" @click="openRate(detailFor)">写评价</button>
@@ -264,11 +337,12 @@ onMounted(load)
 .plugin-store { max-width: 900px; margin: 0 auto; padding: 16px; }
 .ps-head h3 { margin: 0 0 4px; }
 .ps-sub { font-size: 13px; color: var(--muted); }
-.ps-tools { margin-top: 12px; }
+.ps-tools { margin-top: 12px; display: flex; gap: 8px; }
 .ps-search {
-  width: 100%; padding: 9px 12px; border: 1px solid var(--border);
+  flex: 1; padding: 9px 12px; border: 1px solid var(--border);
   border-radius: 8px; font-size: 14px; font-family: inherit; background: var(--bg); color: var(--text);
 }
+.ps-btn.import { flex: none; padding: 0 14px; }
 .ps-notice { margin-top: 8px; font-size: 13px; color: var(--ok); }
 .ps-error { margin-top: 8px; font-size: 13px; color: var(--danger); }
 .ps-cats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
@@ -348,6 +422,9 @@ onMounted(load)
 .ps-desc { font-size: 12px; color: var(--muted); margin-top: 4px; flex: 1; min-height: 32px; }
 .ps-meta { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 11px; color: var(--muted); }
 .ps-author { margin-right: auto; }
+.ps-source { padding: 1px 7px; border-radius: 999px; font-size: 10px; white-space: nowrap; }
+.ps-source.remote { background: #ecfdf5; color: #059669; }
+.ps-source.local { background: #eff6ff; color: #2563eb; }
 .ps-actions { display: flex; gap: 6px; margin-top: 10px; }
 .ps-btn {
   flex: 1; border: 1px solid var(--primary); background: var(--primary); color: #fff;

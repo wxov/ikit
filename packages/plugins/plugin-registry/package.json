@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "adm-zip": "0.6.0",
     "cordis": "^3.18.1"
   },
   "devDependencies": {
