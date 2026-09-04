@@ -9,7 +9,12 @@ import { JsonAgentStore, type AgentStore } from './store.js'
 import type { AgentMessage, AgentMessageInput, AgentNode, AgentNodeInput, AgentService, AgentSession, AgentStreamEvent, AgentTask, AgentTaskInput, AgentTool } from './types.js'
 
 export const name = 'agent'
-export const inject = ['llm', 'knowledge']
+// account 为可选依赖：仅用于存量会话迁移时解析 admin 首账号；不注入时按「无 admin」兜底清空
+export const inject = {
+  llm: { required: true },
+  knowledge: { required: true },
+  account: { required: false },
+}
 
 export interface Config {
   dataDir?: string
@@ -31,6 +36,11 @@ export const Config: Schema<Config> = Schema.object({
   knowledgeTopK: Schema.number().default(3),
   enableWriteTools: Schema.boolean().default(false),
 })
+
+/** account 可选依赖的最小结构面（避免硬依赖 @ikit/plugin-account 的完整类型） */
+interface AccountLike {
+  listUsers(): Promise<Array<{ id: string; role: 'user' | 'admin' }>>
+}
 
 interface AgentContext extends Context {
   llm: LlmService
@@ -238,20 +248,57 @@ export function apply(_ctx: Context, config: Config) {
     yield { type: 'done' }
   }
 
-  const loadDb = () => store.load()
+  // 存量会话迁移（懒触发、幂等）：仅处理缺 ownerId 的会话；有 admin 归属 admin 首账号，否则清空并告警
+  let migrated = false
+  async function migrateLegacySessions(): Promise<{ migrated: number; cleared: number }> {
+    if (migrated) return { migrated: 0, cleared: 0 }
+    migrated = true
+    const db = await store.load()
+    const legacy = db.sessions.filter((s) => !s.ownerId)
+    if (!legacy.length) return { migrated: 0, cleared: 0 }
 
-  async function listSessions(): Promise<AgentSession[]> {
+    // account 为可选注入：仅迁移时经代理按需解析，避免 AgentContext 与 core 的 Context 增强冲突
+    const account = (ctx as AgentContext & { account?: AccountLike }).account
+    const users = (await account?.listUsers()) ?? []
+    const admin = users.find((u) => u.role === 'admin')
+    if (admin) {
+      for (const s of legacy) s.ownerId = admin.id
+      await store.save(db)
+      console.log(`[agent] 已将 ${legacy.length} 个遗留会话归属给 admin`)
+      return { migrated: legacy.length, cleared: 0 }
+    }
+
+    db.sessions = db.sessions.filter((s) => s.ownerId)
+    db.messages = db.messages.filter((m) => db.sessions.some((s) => s.id === m.sessionId))
+    await store.save(db)
+    console.warn(`[agent] 未找到 admin，清空 ${legacy.length} 个遗留会话`)
+    return { migrated: 0, cleared: legacy.length }
+  }
+
+  const loadDb = async () => {
+    await migrateLegacySessions()
+    return store.load()
+  }
+
+  async function listSessions(ownerId: string): Promise<AgentSession[]> {
     const db = await loadDb()
     return db.sessions
+      .filter((s) => s.ownerId === ownerId)
       .slice()
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
   }
 
-  async function createSession(title?: string): Promise<AgentSession> {
+  async function getSession(ownerId: string, id: string): Promise<AgentSession | undefined> {
+    const db = await loadDb()
+    return db.sessions.find((s) => s.id === id && s.ownerId === ownerId)
+  }
+
+  async function createSession(ownerId: string, title?: string): Promise<AgentSession> {
     const db = await loadDb()
     const now = new Date().toISOString()
     const session: AgentSession = {
       id: randomUUID(),
+      ownerId,
       title: (title || '').trim() || '新会话',
       createdAt: now,
       updatedAt: now,
@@ -261,34 +308,45 @@ export function apply(_ctx: Context, config: Config) {
     return session
   }
 
-  async function renameSession(id: string, title: string): Promise<AgentSession[]> {
+  async function renameSession(ownerId: string, id: string, title: string): Promise<AgentSession[]> {
     const db = await loadDb()
-    const s = db.sessions.find((x) => x.id === id)
+    const s = db.sessions.find((x) => x.id === id && x.ownerId === ownerId)
     if (s) {
       s.title = (title || '').trim() || s.title
       s.updatedAt = new Date().toISOString()
       await store.save(db)
     }
-    return listSessions()
+    return listSessions(ownerId)
   }
 
-  async function deleteSession(id: string): Promise<AgentSession[]> {
+  async function deleteSession(ownerId: string, id: string): Promise<AgentSession[]> {
     const db = await loadDb()
-    db.sessions = db.sessions.filter((x) => x.id !== id)
-    db.messages = db.messages.filter((m) => m.sessionId !== id)
-    await store.save(db)
-    return listSessions()
+    const target = db.sessions.find((x) => x.id === id && x.ownerId === ownerId)
+    if (target) {
+      db.sessions = db.sessions.filter((x) => x !== target)
+      db.messages = db.messages.filter((m) => m.sessionId !== id)
+      await store.save(db)
+    }
+    return listSessions(ownerId)
   }
 
-  async function listMessages(sessionId: string): Promise<AgentMessage[]> {
+  async function listMessages(ownerId: string, sessionId: string): Promise<AgentMessage[]> {
     const db = await loadDb()
+    const owned = db.sessions.some((s) => s.id === sessionId && s.ownerId === ownerId)
+    if (!owned) return []
     return db.messages
       .filter((m) => m.sessionId === sessionId)
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
   }
 
-  async function appendMessage(sessionId: string, input: AgentMessageInput): Promise<AgentMessage> {
+  async function appendMessage(
+    ownerId: string,
+    sessionId: string,
+    input: AgentMessageInput,
+  ): Promise<AgentMessage | undefined> {
     const db = await loadDb()
+    const s = db.sessions.find((x) => x.id === sessionId && x.ownerId === ownerId)
+    if (!s) return undefined
     const now = new Date().toISOString()
     const msg: AgentMessage = {
       id: randomUUID(),
@@ -299,19 +357,16 @@ export function apply(_ctx: Context, config: Config) {
       createdAt: now,
     }
     db.messages.push(msg)
-    const s = db.sessions.find((x) => x.id === sessionId)
-    if (s) {
-      s.updatedAt = now
-      if ((s.title === '新会话' || !s.title) && input.role === 'user' && input.content) {
-        s.title = input.content.slice(0, 30)
-      }
+    s.updatedAt = now
+    if ((s.title === '新会话' || !s.title) && input.role === 'user' && input.content) {
+      s.title = input.content.slice(0, 30)
     }
     await store.save(db)
     return msg
   }
 
-  async function historyOf(sessionId: string): Promise<ChatMessage[]> {
-    const msgs = await listMessages(sessionId)
+  async function historyOf(ownerId: string, sessionId: string): Promise<ChatMessage[]> {
+    const msgs = await listMessages(ownerId, sessionId)
     return msgs.map((m) => ({ role: m.role, content: m.content }))
   }
 
@@ -427,7 +482,9 @@ export function apply(_ctx: Context, config: Config) {
     deleteSession,
     listMessages,
     appendMessage,
+    getSession,
     historyOf,
+    migrateLegacySessions,
     listNodes,
     registerNode,
     heartbeat,

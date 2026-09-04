@@ -341,17 +341,65 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
 
   app.post('/api/plugin-store/install', (req, reply) =>
     requireAdmin(req, reply, async () => {
-      const body = req.body as { name?: string }
-      const plugins = await ctx.pluginRegistry.install(body?.name ?? '')
-      return { plugins, store: ctx.pluginRegistry.store() }
+      // 支持 { name }（沿用商店条目，catalog 假安装 / remote 真下载）或 { name, packageUrl, sha256 }（直接远端安装）
+      const body = req.body as { name?: string; packageUrl?: string; sha256?: string } | undefined
+      try {
+        const plugins = await ctx.pluginRegistry.install(body ?? {})
+        return { plugins, store: ctx.pluginRegistry.store() }
+      } catch (e: any) {
+        return reply.code(400).send({ error: e?.message || '安装失败' })
+      }
+    }),
+  )
+
+  // 导出第三方目录包为 zip（内置 7 条目录源与 builtin 不可导出）
+  app.get('/api/plugin-store/:name/export', (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      const name = (req.params as { name: string }).name
+      try {
+        const result = await ctx.pluginRegistry.exportPackage(name)
+        reply.header('Content-Type', 'application/zip')
+        reply.header('Content-Disposition', `attachment; filename="${result.filename}"`)
+        return reply.send(result.buffer)
+      } catch (e: any) {
+        const msg = e?.message || '导出失败'
+        const code = msg.includes('不可导出') ? 400 : 404
+        return reply.code(code).send({ error: msg })
+      }
+    }),
+  )
+
+  // 导入插件包（zip base64 + 可选 sha256）；仅 admin，信任边界见文档
+  app.post('/api/plugin-store/import', { bodyLimit: 5 * 1024 * 1024 }, (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      const body = req.body as { data?: string; sha256?: string }
+      if (!body?.data) return reply.code(400).send({ error: 'data is required' })
+      try {
+        const plugins = await ctx.pluginRegistry.importPackage(body.data, body.sha256)
+        return { plugins, store: ctx.pluginRegistry.store() }
+      } catch (e: any) {
+        return reply.code(400).send({ error: e?.message || '导入失败' })
+      }
+    }),
+  )
+
+  // 手动刷新远端静态目录源
+  app.post('/api/plugin-store/refresh', (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      await ctx.pluginRegistry.refreshRegistry()
+      return { store: ctx.pluginRegistry.store() }
     }),
   )
 
   app.post('/api/plugin-store/:name/update', (req, reply) =>
     requireAdmin(req, reply, async () => {
       const name = (req.params as { name: string }).name
-      const plugins = await ctx.pluginRegistry.update(name)
-      return { plugins, store: ctx.pluginRegistry.store() }
+      try {
+        const plugins = await ctx.pluginRegistry.update(name)
+        return { plugins, store: ctx.pluginRegistry.store() }
+      } catch (e: any) {
+        return reply.code(400).send({ error: e?.message || '更新失败' })
+      }
     }),
   )
 
@@ -709,28 +757,42 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     }),
   )
 
-  // ---- Agent 会话管理（多会话 + 持久化 + 三端共享） ----
-  app.get('/api/agent/sessions', async () => ({
-    sessions: await ctx.agent.listSessions(),
-  }))
-  app.post('/api/agent/sessions', async (req, reply) => {
-    const body = req.body as { title?: string }
-    const session = await ctx.agent.createSession(body?.title)
-    return reply.code(201).send({ session, sessions: await ctx.agent.listSessions() })
-  })
-  app.patch('/api/agent/sessions/:id', async (req, reply) => {
-    const id = (req.params as { id: string }).id
-    const body = req.body as { title?: string }
-    return { sessions: await ctx.agent.renameSession(id, body?.title ?? '') }
-  })
-  app.delete('/api/agent/sessions/:id', async (req) => {
-    const id = (req.params as { id: string }).id
-    return { sessions: await ctx.agent.deleteSession(id) }
-  })
-  app.get('/api/agent/sessions/:id/messages', async (req) => {
-    const id = (req.params as { id: string }).id
-    return { messages: await ctx.agent.listMessages(id) }
-  })
+  // ---- Agent 会话管理（多会话 + 持久化 + 三端共享；登录 + 按 ownerId 隔离） ----
+  app.get('/api/agent/sessions', (req, reply) =>
+    requireUser(req, reply, async (user) => ({ sessions: await ctx.agent.listSessions(user.id) })),
+  )
+  app.post('/api/agent/sessions', (req, reply) =>
+    requireUser(req, reply, async (user) => {
+      const body = req.body as { title?: string }
+      const session = await ctx.agent.createSession(user.id, body?.title)
+      return reply.code(201).send({ session, sessions: await ctx.agent.listSessions(user.id) })
+    }),
+  )
+  app.patch('/api/agent/sessions/:id', (req, reply) =>
+    requireUser(req, reply, async (user) => {
+      const id = (req.params as { id: string }).id
+      const body = req.body as { title?: string }
+      const session = await ctx.agent.getSession(user.id, id)
+      if (!session) return reply.code(404).send({ error: '会话不存在' })
+      return { sessions: await ctx.agent.renameSession(user.id, id, body?.title ?? '') }
+    }),
+  )
+  app.delete('/api/agent/sessions/:id', (req, reply) =>
+    requireUser(req, reply, async (user) => {
+      const id = (req.params as { id: string }).id
+      const session = await ctx.agent.getSession(user.id, id)
+      if (!session) return reply.code(404).send({ error: '会话不存在' })
+      return { sessions: await ctx.agent.deleteSession(user.id, id) }
+    }),
+  )
+  app.get('/api/agent/sessions/:id/messages', (req, reply) =>
+    requireUser(req, reply, async (user) => {
+      const id = (req.params as { id: string }).id
+      const session = await ctx.agent.getSession(user.id, id)
+      if (!session) return reply.code(404).send({ error: '会话不存在' })
+      return { messages: await ctx.agent.listMessages(user.id, id) }
+    }),
+  )
 
   // ---- Agent 节点（桌面端本地 agent 运行时）注册/发现/心跳 ----
   app.get('/api/agent/nodes', async () => {
@@ -754,14 +816,27 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
       return reply.code(201).send({ node })
     }),
   )
-  app.post('/api/agent/nodes/:id/heartbeat', async (req) => {
-    const id = (req.params as { id: string }).id
-    return { ok: await ctx.agent.heartbeat(id) }
-  })
-  app.delete('/api/agent/nodes/:id', async (req) => {
-    const id = (req.params as { id: string }).id
-    return { nodes: await ctx.agent.unregisterNode(id) }
-  })
+  app.post('/api/agent/nodes/:id/heartbeat', (req, reply) =>
+    requireUser(req, reply, async (user) => {
+      const id = (req.params as { id: string }).id
+      const node = (await ctx.agent.listNodes()).find((n) => n.id === id)
+      // server 节点无 ownerId 放开；desktop 节点仅本人可心跳（与派任务校验一致）
+      if (!node || (node.ownerId && node.ownerId !== user.id)) {
+        return reply.code(404).send({ error: '节点不存在' })
+      }
+      return { ok: await ctx.agent.heartbeat(id) }
+    }),
+  )
+  app.delete('/api/agent/nodes/:id', (req, reply) =>
+    requireUser(req, reply, async (user) => {
+      const id = (req.params as { id: string }).id
+      const node = (await ctx.agent.listNodes()).find((n) => n.id === id)
+      if (!node || (node.ownerId && node.ownerId !== user.id)) {
+        return reply.code(404).send({ error: '节点不存在' })
+      }
+      return { nodes: await ctx.agent.unregisterNode(id) }
+    }),
+  )
 
   // ---- Agent 远程任务：移动/Web 派发给指定节点，节点轮询执行并回传 ----
   app.post('/api/agent/tasks', (req, reply) =>
@@ -785,112 +860,134 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
       return reply.code(201).send({ task })
     }),
   )
-  app.get('/api/agent/nodes/:id/tasks', async (req) => {
-    const id = (req.params as { id: string }).id
-    return { tasks: await ctx.agent.listPendingTasks(id) }
-  })
-  app.get('/api/agent/tasks/:id', async (req) => {
-    const id = (req.params as { id: string }).id
-    const task = await ctx.agent.getTask(id)
-    if (!task) return { task: null }
-    return { task }
-  })
-  app.post('/api/agent/tasks/:id/run', async (req, reply) => {
-    const id = (req.params as { id: string }).id
-    const task = await ctx.agent.getTask(id)
-    if (!task) return reply.code(404).send({ error: 'task not found' })
-    if (task.status === 'done' || task.status === 'error') return { task }
-    let answer = ''
-    const steps: Array<{ toolName: string; toolArgs: Record<string, unknown>; toolResult: string }> = []
-    try {
-      for await (const ev of ctx.agent.runStream(task.message, [])) {
-        if (ev.type === 'delta') answer += ev.content
-        else if (ev.type === 'tool') {
-          steps.push({ toolName: ev.toolName, toolArgs: ev.toolArgs, toolResult: ev.toolResult })
+  app.get('/api/agent/nodes/:id/tasks', (req, reply) =>
+    requireUser(req, reply, async (user) => {
+      const id = (req.params as { id: string }).id
+      const node = (await ctx.agent.listNodes()).find((n) => n.id === id)
+      if (!node || (node.ownerId && node.ownerId !== user.id)) {
+        return reply.code(404).send({ error: '节点不存在' })
+      }
+      return { tasks: await ctx.agent.listPendingTasks(id) }
+    }),
+  )
+  app.get('/api/agent/tasks/:id', (req, reply) =>
+    requireUser(req, reply, async (user) => {
+      const id = (req.params as { id: string }).id
+      const task = await ctx.agent.getTask(id)
+      if (!task || task.ownerId !== user.id) return { task: null }
+      return { task }
+    }),
+  )
+  app.post('/api/agent/tasks/:id/run', (req, reply) =>
+    requireUser(req, reply, async (user) => {
+      const id = (req.params as { id: string }).id
+      const task = await ctx.agent.getTask(id)
+      if (!task || task.ownerId !== user.id) return reply.code(404).send({ error: 'task not found' })
+      if (task.status === 'done' || task.status === 'error') return { task }
+      let answer = ''
+      const steps: Array<{ toolName: string; toolArgs: Record<string, unknown>; toolResult: string }> = []
+      try {
+        for await (const ev of ctx.agent.runStream(task.message, [])) {
+          if (ev.type === 'delta') answer += ev.content
+          else if (ev.type === 'tool') {
+            steps.push({ toolName: ev.toolName, toolArgs: ev.toolArgs, toolResult: ev.toolResult })
+          }
+        }
+        return { task: await ctx.agent.completeTask(id, answer, steps) }
+      } catch (e) {
+        return {
+          task: await ctx.agent.completeTask(
+            id,
+            '',
+            undefined,
+            e instanceof Error ? e.message : String(e),
+          ),
         }
       }
-      return { task: await ctx.agent.completeTask(id, answer, steps) }
-    } catch (e) {
-      return {
-        task: await ctx.agent.completeTask(
-          id,
-          '',
-          undefined,
-          e instanceof Error ? e.message : String(e),
-        ),
+    }),
+  )
+  app.post('/api/agent/tasks/:id/complete', (req, reply) =>
+    requireUser(req, reply, async (user) => {
+      const id = (req.params as { id: string }).id
+      const body = req.body as { result?: string; error?: string; steps?: Array<{ toolName: string; toolArgs: Record<string, unknown>; toolResult: string }> }
+      const task = await ctx.agent.getTask(id)
+      if (!task || task.ownerId !== user.id) return reply.code(404).send({ error: 'task not found' })
+      const completed = await ctx.agent.completeTask(id, body?.result ?? '', body?.steps, body?.error)
+      if (!completed) return reply.code(404).send({ error: 'task not found' })
+      return { task: completed }
+    }),
+  )
+
+  // Agent 会话流式输出（SSE）：在指定会话内对话并持久化（登录 + 归属校验，须在 writeHead 前完成）
+  app.post('/api/agent/sessions/:id/chat-stream', (req, reply) =>
+    requireUser(req, reply, async (user) => {
+      const id = (req.params as { id: string }).id
+      const body = req.body as { message?: string }
+      if (!body?.message?.trim()) {
+        return reply.code(400).send({ error: 'message is required' })
       }
-    }
-  })
-  app.post('/api/agent/tasks/:id/complete', async (req, reply) => {
-    const id = (req.params as { id: string }).id
-    const body = req.body as { result?: string; error?: string; steps?: Array<{ toolName: string; toolArgs: Record<string, unknown>; toolResult: string }> }
-    const task = await ctx.agent.completeTask(id, body?.result ?? '', body?.steps, body?.error)
-    if (!task) return reply.code(404).send({ error: 'task not found' })
-    return { task }
-  })
+      // 归属校验必须在 writeHead 之前完成（否则无法返回 404）
+      const session = await ctx.agent.getSession(user.id, id)
+      if (!session) return reply.code(404).send({ error: '会话不存在' })
 
-  // Agent 会话流式输出（SSE）：在指定会话内对话并持久化
-  app.post('/api/agent/sessions/:id/chat-stream', async (req, reply) => {
-    const id = (req.params as { id: string }).id
-    const body = req.body as { message?: string }
-    if (!body?.message?.trim()) {
-      return reply.code(400).send({ error: 'message is required' })
-    }
-    // 持久化用户消息，并用之前的消息作为历史
-    await ctx.agent.appendMessage(id, { role: 'user', content: body.message })
-    const fullHistory = await ctx.agent.historyOf(id)
-    const priorHistory = fullHistory.slice(0, -1)
+      // 持久化用户消息，并用之前的消息作为历史
+      await ctx.agent.appendMessage(user.id, id, { role: 'user', content: body.message })
+      const fullHistory = await ctx.agent.historyOf(user.id, id)
+      const priorHistory = fullHistory.slice(0, -1)
 
-    const raw = reply.raw
-    raw.writeHead(200, {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    })
-    let assistantContent = ''
-    const steps: Array<{ toolName: string; toolArgs: Record<string, unknown>; toolResult: string }> = []
-    try {
-      for await (const ev of ctx.agent.runStream(body.message, priorHistory)) {
-        if (ev.type === 'delta') assistantContent += ev.content
-        else if (ev.type === 'tool') {
-          steps.push({ toolName: ev.toolName, toolArgs: ev.toolArgs, toolResult: ev.toolResult })
+      const raw = reply.raw
+      raw.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      })
+      let assistantContent = ''
+      const steps: Array<{ toolName: string; toolArgs: Record<string, unknown>; toolResult: string }> = []
+      try {
+        for await (const ev of ctx.agent.runStream(body.message, priorHistory)) {
+          if (ev.type === 'delta') assistantContent += ev.content
+          else if (ev.type === 'tool') {
+            steps.push({ toolName: ev.toolName, toolArgs: ev.toolArgs, toolResult: ev.toolResult })
+          }
+          raw.write(`data: ${JSON.stringify(ev)}\n\n`)
         }
-        raw.write(`data: ${JSON.stringify(ev)}\n\n`)
+        await ctx.agent.appendMessage(user.id, id, { role: 'assistant', content: assistantContent, steps })
+      } catch (e) {
+        raw.write(
+          `data: ${JSON.stringify({ type: 'error', error: e instanceof Error ? e.message : String(e) })}\n\n`,
+        )
       }
-      await ctx.agent.appendMessage(id, { role: 'assistant', content: assistantContent, steps })
-    } catch (e) {
-      raw.write(
-        `data: ${JSON.stringify({ type: 'error', error: e instanceof Error ? e.message : String(e) })}\n\n`,
-      )
-    }
-    raw.end()
-  })
+      raw.end()
+    }),
+  )
 
-  // Agent 流式输出（SSE）
-  app.post('/api/agent/chat-stream', async (req, reply) => {
-    const body = req.body as { message?: string; history?: ChatMessage[] }
-    if (!body?.message?.trim()) {
-      return reply.code(400).send({ error: 'message is required' })
-    }
-    const raw = reply.raw
-    raw.writeHead(200, {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    })
-    try {
-      for await (const ev of ctx.agent.runStream(body.message, body.history ?? [])) {
-        raw.write(`data: ${JSON.stringify(ev)}\n\n`)
+  // Agent 流式输出（SSE）（通用，无会话；登录鉴权，与 /api/llm/chat-stream 一致）
+  app.post('/api/agent/chat-stream', (req, reply) =>
+    requireUser(req, reply, async () => {
+      const body = req.body as { message?: string; history?: ChatMessage[] }
+      if (!body?.message?.trim()) {
+        return reply.code(400).send({ error: 'message is required' })
       }
-    } catch (e) {
-      raw.write(
-        `data: ${JSON.stringify({ type: 'error', error: e instanceof Error ? e.message : String(e) })}\n\n`,
-      )
-    }
-    raw.end()
-  })
+      const raw = reply.raw
+      raw.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      })
+      try {
+        for await (const ev of ctx.agent.runStream(body.message, body.history ?? [])) {
+          raw.write(`data: ${JSON.stringify(ev)}\n\n`)
+        }
+      } catch (e) {
+        raw.write(
+          `data: ${JSON.stringify({ type: 'error', error: e instanceof Error ? e.message : String(e) })}\n\n`,
+        )
+      }
+      raw.end()
+    }),
+  )
 
   // ---- LLM 原始流式（登录鉴权）：桌面节点本地 agent 循环用它自行驱动 function-calling ----
   app.post('/api/llm/chat-stream', (req, reply) =>

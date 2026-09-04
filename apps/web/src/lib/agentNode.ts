@@ -59,7 +59,7 @@ async function registerOnce(): Promise<void> {
 async function heartbeatOnce(): Promise<void> {
   if (!getToken()) return
   try {
-    await api(`/api/agent/nodes/${nodeId()}/heartbeat`, { method: 'POST' })
+    await api(`/api/agent/nodes/${nodeId()}/heartbeat`, { method: 'POST', headers: authHeaders() })
   } catch {
     /* ignore */
   }

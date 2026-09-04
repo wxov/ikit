@@ -35,6 +35,8 @@ export type AgentStreamEvent =
 /** 会话（持久化） */
 export interface AgentSession {
   id: string
+  /** 归属用户 id（迁移后为必填；容错旧数据保留可选） */
+  ownerId?: string
   title: string
   createdAt: string
   updatedAt: string
@@ -104,15 +106,19 @@ export interface AgentService {
   listTools(): AgentToolInfo[]
   runTool(name: string, args: Record<string, unknown>): Promise<string>
   runStream(userMessage: string, history?: ChatMessage[]): AsyncIterable<AgentStreamEvent>
-  /** 会话管理 */
-  listSessions(): Promise<AgentSession[]>
-  createSession(title?: string): Promise<AgentSession>
-  renameSession(id: string, title: string): Promise<AgentSession[]>
-  deleteSession(id: string): Promise<AgentSession[]>
-  listMessages(sessionId: string): Promise<AgentMessage[]>
-  appendMessage(sessionId: string, input: AgentMessageInput): Promise<AgentMessage>
+  /** 会话管理（按 ownerId 隔离；admin 无特殊例外，与其他用户一致） */
+  listSessions(ownerId: string): Promise<AgentSession[]>
+  createSession(ownerId: string, title?: string): Promise<AgentSession>
+  renameSession(ownerId: string, id: string, title: string): Promise<AgentSession[]>
+  deleteSession(ownerId: string, id: string): Promise<AgentSession[]>
+  listMessages(ownerId: string, sessionId: string): Promise<AgentMessage[]>
+  appendMessage(ownerId: string, sessionId: string, input: AgentMessageInput): Promise<AgentMessage | undefined>
+  /** 按归属查询单个会话（供路由做 403/404 判定）；不归属/不存在返回 undefined */
+  getSession(ownerId: string, id: string): Promise<AgentSession | undefined>
   /** 会话历史 → 供 LLM 的 ChatMessage 序列 */
-  historyOf(sessionId: string): Promise<ChatMessage[]>
+  historyOf(ownerId: string, sessionId: string): Promise<ChatMessage[]>
+  /** 存量会话迁移（懒触发、幂等）：无 ownerId 的会话归属 admin 首账号；无 admin 则清空并告警 */
+  migrateLegacySessions(): Promise<{ migrated: number; cleared: number }>
   /** 节点注册/发现/心跳 */
   listNodes(): Promise<AgentNode[]>
   registerNode(input: AgentNodeInput): Promise<AgentNode>

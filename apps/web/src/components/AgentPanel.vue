@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, onMounted } from 'vue'
+import { ref, computed, inject, nextTick, onMounted } from 'vue'
+import type { Ref } from 'vue'
 import { api } from '../lib/api'
 import { apiUrl } from '../lib/config'
 import { authHeaders } from '../lib/auth'
+import type { PublicUser } from '../lib/auth'
 import { renderMarkdown } from '../lib/markdown'
 
 interface AgentSession {
   id: string
+  ownerId?: string
   title: string
   createdAt: string
   updatedAt: string
@@ -24,6 +27,9 @@ interface ChatItem {
   content: string
   steps?: Array<{ toolName: string; toolArgs: Record<string, unknown>; toolResult: string }>
 }
+
+const currentUser = inject<Ref<PublicUser | null>>('currentUser', ref(null))
+const loggedIn = computed(() => !!currentUser.value)
 
 const sessions = ref<AgentSession[]>([])
 const currentId = ref('')
@@ -94,7 +100,9 @@ async function pollTaskResult(id: string) {
   const item = remoteTasks.value.find((t) => t.id === id)
   if (!item) return
   try {
-    const r = await api<{ task: { status: string; result?: string } | null }>(`/api/agent/tasks/${id}`)
+    const r = await api<{ task: { status: string; result?: string } | null }>(`/api/agent/tasks/${id}`, {
+      headers: authHeaders(),
+    })
     if (r.task) {
       item.status = r.task.status
       item.result = r.task.result
@@ -108,8 +116,9 @@ async function pollTaskResult(id: string) {
 }
 
 async function loadSessions() {
+  if (!loggedIn.value) return
   try {
-    const r = await api<{ sessions: AgentSession[] }>('/api/agent/sessions')
+    const r = await api<{ sessions: AgentSession[] }>('/api/agent/sessions', { headers: authHeaders() })
     sessions.value = r.sessions
     if (!currentId.value && sessions.value.length) currentId.value = sessions.value[0].id
   } catch (e: any) {
@@ -121,7 +130,9 @@ async function loadMessages() {
   messages.value = []
   if (!currentId.value) return
   try {
-    const r = await api<{ messages: AgentMessage[] }>(`/api/agent/sessions/${currentId.value}/messages`)
+    const r = await api<{ messages: AgentMessage[] }>(`/api/agent/sessions/${currentId.value}/messages`, {
+      headers: authHeaders(),
+    })
     messages.value = r.messages.map((m) => ({
       role: m.role,
       content: m.content,
@@ -139,10 +150,12 @@ async function selectSession(id: string) {
 }
 
 async function newSession() {
+  if (!loggedIn.value) return
   stop()
   try {
     const r = await api<{ session: AgentSession; sessions: AgentSession[] }>('/api/agent/sessions', {
       method: 'POST',
+      headers: authHeaders(),
       body: JSON.stringify({ title: '' }),
     })
     sessions.value = r.sessions
@@ -157,7 +170,10 @@ async function newSession() {
 async function deleteSession(id: string) {
   if (!confirm('删除该会话及其历史记录？')) return
   try {
-    const r = await api<{ sessions: AgentSession[] }>(`/api/agent/sessions/${id}`, { method: 'DELETE' })
+    const r = await api<{ sessions: AgentSession[] }>(`/api/agent/sessions/${id}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    })
     sessions.value = r.sessions
     if (currentId.value === id) {
       currentId.value = sessions.value[0]?.id ?? ''
@@ -174,6 +190,7 @@ async function renameSession(id: string) {
   try {
     const r = await api<{ sessions: AgentSession[] }>(`/api/agent/sessions/${id}`, {
       method: 'PATCH',
+      headers: authHeaders(),
       body: JSON.stringify({ title }),
     })
     sessions.value = r.sessions
@@ -185,7 +202,7 @@ async function renameSession(id: string) {
 
 async function send() {
   const text = input.value.trim()
-  if (!text || loading.value || !currentId.value) return
+  if (!loggedIn.value || !text || loading.value || !currentId.value) return
   messages.value.push({ role: 'user', content: text })
   input.value = ''
   loading.value = true
@@ -199,7 +216,7 @@ async function send() {
     abortController = new AbortController()
     const res = await fetch(apiUrl(`/api/agent/sessions/${currentId.value}/chat-stream`), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ message: text }),
       signal: abortController.signal,
     })
@@ -255,8 +272,10 @@ function scrollToBottom() {
 onMounted(async () => {
   loadTools()
   loadNodes()
-  await loadSessions()
-  if (currentId.value) await loadMessages()
+  if (loggedIn.value) {
+    await loadSessions()
+    if (currentId.value) await loadMessages()
+  }
 })
 </script>
 
@@ -269,6 +288,11 @@ onMounted(async () => {
           {{ t.name }}
         </span>
       </div>
+    </div>
+
+    <!-- 未登录提示（保留 Agent 入口，面板内提示登录） -->
+    <div v-if="!loggedIn" class="agent-login-hint">
+      ⚠ 请先登录后使用 AI Agent（会话、消息与对话均需登录）。
     </div>
 
     <!-- 可用节点 -->
@@ -309,7 +333,7 @@ onMounted(async () => {
     </div>
 
     <!-- 会话列表 -->
-    <div class="sessions">
+    <div v-if="loggedIn" class="sessions">
       <button class="sess-new" @click="newSession">＋ 新会话</button>
       <div class="sess-list">
         <div
@@ -332,7 +356,7 @@ onMounted(async () => {
     <div v-if="error" class="error" style="margin-top: 12px">{{ error }}</div>
     <div v-if="statusText" class="agent-status">{{ statusText }}</div>
 
-    <div ref="chatEl" class="chat">
+    <div v-if="loggedIn" ref="chatEl" class="chat">
       <div v-if="!messages.length" class="empty">
         新建会话后向 Agent 提问，它会按需调用工具（如检索知识库）来回答。<br />
         示例：先到「知识库」添加条目，再回来问「Cordis 是什么？」
@@ -363,7 +387,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div class="row">
+    <div v-if="loggedIn" class="row">
       <textarea
         v-model="input"
         placeholder="输入问题，例如：Cordis 是什么？"
@@ -381,6 +405,16 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   height: calc(100vh - 140px);
+}
+
+.agent-login-hint {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px dashed var(--warn, #d97706);
+  border-radius: 10px;
+  background: #fffbeb;
+  color: var(--text);
+  font-size: 13px;
 }
 
 .sessions {
