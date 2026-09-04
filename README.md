@@ -135,7 +135,7 @@ export function apply(ctx: Context, config: Config) {
 
 `packages/plugins/knowledge` 提供 `ctx.knowledge` 服务，功能完整：
 
-- **条目管理**：创建 / 列表（分页 + 可见性过滤）/ 更新（写入版本历史）
+- **条目管理**：创建 / 列表（分页 + 可见性过滤）/ 更新
 - **混合检索**：Fuse.js 模糊搜索 + 停用词过滤的关键词子串匹配 +（配置 embedding 时的）向量余弦相似度，三者去重融合排序
 - **文档树**：`parentId`/`sortOrder` 层级 + 拖拽排序/移动（moveDoc / reorder）+ 置顶（`pinned`）
 - **分类**：路径式层级（如 `技术/前端`），从条目派生；添加分类（父级自动补全）+ 批量归类 + 计数
@@ -162,7 +162,7 @@ export function apply(ctx: Context, config: Config) {
 - **工具注册**：`ctx.agent.registerTool({ name, description, parameters, handler })`
 - **内置工具**：`knowledge_search`（RAG 检索）、`current_time`、`web_fetch`（网页抓取）；可选 `knowledge_add`（写库，需 `enableWriteTools`）
 - **流式输出**：`runStream()` 逐 token 产出，工具调用与回答交替推送（SSE）
-- **多会话**：会话创建/重命名/删除 + 消息持久化（三端共享；会话归属/鉴权为已知缺口，见 [docs/需求功能总览.md](docs/需求功能总览.md) 模块⑤）
+- **多会话**：会话创建/重命名/删除 + 消息持久化（三端共享；会话按 `ownerId` 账号隔离，会话/消息/chat-stream 均需登录，未登录 401、他人会话 404，见 [docs/需求功能总览.md](docs/需求功能总览.md) 模块⑤）
 - **节点与任务**：桌面节点注册/心跳/在线判定 + 远程任务派发/轮询执行/回传（仅限自己名下节点）
 
 新增一个 Agent 工具只需注册一个对象，后续机器人适配器、业务能力都可以照此扩展。
@@ -234,7 +234,10 @@ WebSocket 实时同步让三端联动（任一端的变更，其他端自动刷�
 | GET | `/api/plugin-store` | 商店列表 |
 | GET | `/api/plugin-store/categories` | 商店分类 |
 | POST | `/api/plugin-store/rate` | 评分/评论 |
-| POST | `/api/plugin-store/install` | 安装（站主） |
+| POST | `/api/plugin-store/install` | 安装（站主；`{name}` 沿用商店条目，或 `{name, packageUrl, sha256}` 直接远端安装） |
+| GET | `/api/plugin-store/:name/export` | 导出第三方插件包 zip（站主） |
+| POST | `/api/plugin-store/import` | 导入插件包 zip base64（站主，`{data, sha256?}`） |
+| POST | `/api/plugin-store/refresh` | 手动刷新远端市场目录源（站主） |
 | POST | `/api/plugin-store/:name/update` | 更新（站主） |
 | DELETE | `/api/plugin-store/:name` | 卸载（站主） |
 
@@ -280,22 +283,22 @@ WebSocket 实时同步让三端联动（任一端的变更，其他端自动刷�
 |---|---|---|
 | GET | `/api/agent/tools` | 工具列表 |
 | POST | `/api/agent/tools/:name/run` | 执行服务端工具（登录） |
-| GET | `/api/agent/sessions` | 会话列表 |
-| POST | `/api/agent/sessions` | 创建会话 |
-| PATCH | `/api/agent/sessions/:id` | 重命名会话 |
-| DELETE | `/api/agent/sessions/:id` | 删除会话 |
-| GET | `/api/agent/sessions/:id/messages` | 会话消息 |
-| POST | `/api/agent/sessions/:id/chat-stream` | 会话内流式对话（SSE） |
-| POST | `/api/agent/chat-stream` | 流式对话（SSE） |
-| GET | `/api/agent/nodes` | 节点列表 |
+| GET | `/api/agent/sessions` | 会话列表（登录，仅自己） |
+| POST | `/api/agent/sessions` | 创建会话（登录） |
+| PATCH | `/api/agent/sessions/:id` | 重命名会话（登录/归属） |
+| DELETE | `/api/agent/sessions/:id` | 删除会话（登录/归属） |
+| GET | `/api/agent/sessions/:id/messages` | 会话消息（登录/归属） |
+| POST | `/api/agent/sessions/:id/chat-stream` | 会话内流式对话（SSE，登录/归属） |
+| POST | `/api/agent/chat-stream` | 流式对话（SSE，登录） |
+| GET | `/api/agent/nodes` | 节点列表（公开） |
 | POST | `/api/agent/nodes/register` | 注册节点（登录） |
-| POST | `/api/agent/nodes/:id/heartbeat` | 心跳 |
-| DELETE | `/api/agent/nodes/:id` | 注销节点 |
+| POST | `/api/agent/nodes/:id/heartbeat` | 心跳（登录/归属） |
+| DELETE | `/api/agent/nodes/:id` | 注销节点（登录/归属） |
 | POST | `/api/agent/tasks` | 派发任务（登录，仅自己名下节点） |
-| GET | `/api/agent/nodes/:id/tasks` | 节点待办任务 |
-| GET | `/api/agent/tasks/:id` | 查询任务 |
-| POST | `/api/agent/tasks/:id/run` | 执行任务 |
-| POST | `/api/agent/tasks/:id/complete` | 回传结果 |
+| GET | `/api/agent/nodes/:id/tasks` | 节点待办任务（登录/归属） |
+| GET | `/api/agent/tasks/:id` | 查询任务（登录/归属） |
+| POST | `/api/agent/tasks/:id/run` | 执行任务（登录/归属） |
+| POST | `/api/agent/tasks/:id/complete` | 回传结果（登录/归属） |
 
 ### LLM / 实时
 | 方法 | 路径 | 说明 |
