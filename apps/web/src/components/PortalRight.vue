@@ -21,10 +21,6 @@ const tags = ref<Array<{ name: string; count: number }>>([])
 const recent = ref<Array<{ comment: KnowledgeComment; entry?: KnowledgeEntry }>>([])
 const categories = ref<CategoryNode[]>([])
 
-function score(e: KnowledgeEntry): number {
-  return (e.likes ?? 0) * 3 + (e.rating ?? 0) * 2
-}
-
 function shortDate(iso: string): string {
   const d = new Date(iso)
   const p = (n: number) => String(n).padStart(2, '0')
@@ -37,7 +33,7 @@ async function load() {
     const list = (r.entries || []).filter((e) => !e.deletedAt)
     entries.value = list
     hot.value = [...list]
-      .sort((a, b) => score(b) - score(a) || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .slice(0, 8)
     const map = new Map<string, number>()
     for (const e of list) for (const t of e.tags) map.set(t, (map.get(t) ?? 0) + 1)
@@ -109,7 +105,7 @@ onMounted(load)
       <ul class="hot-list">
         <li v-for="e in hot" :key="e.id" class="hot-item" @click="emit('open', e)">
           <span class="hot-title">{{ e.title }}</span>
-          <span class="hot-meta">{{ e.likes ?? 0 }}👍 · {{ shortDate(e.updatedAt) }} · {{ e.category || '未分类' }}</span>
+          <span class="hot-meta">{{ shortDate(e.updatedAt) }} · {{ e.category || '未分类' }}</span>
         </li>
       </ul>
     </section>

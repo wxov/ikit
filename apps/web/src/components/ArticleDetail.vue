@@ -16,10 +16,6 @@ const canEdit = computed(() => userRole.value === 'admin')
 
 const rendered = computed(() => renderMarkdown(props.entry.content).html)
 
-function star(n: number | undefined): string {
-  const s = Math.round(n ?? 0)
-  return '★'.repeat(s) + '☆'.repeat(5 - s)
-}
 function shortDate(iso: string): string {
   const d = new Date(iso)
   const p = (n: number) => String(n).padStart(2, '0')
@@ -40,14 +36,8 @@ function shortDate(iso: string): string {
         <span class="am"><b>📂</b> {{ entry.category || '未分类' }}</span>
         <span class="am"><b>🕑</b> {{ shortDate(entry.updatedAt) }}</span>
         <span v-if="entry.views" class="am"><b>👁</b> {{ entry.views }}</span>
-        <span v-if="entry.likes" class="am"><b>👍</b> {{ entry.likes }}</span>
-        <span v-if="entry.rating" class="am stars">{{ star(entry.rating) }}</span>
       </div>
     </header>
-
-    <div v-if="entry.summary" class="ad-summary">
-      <span class="as-label">AI 摘要</span>{{ entry.summary }}
-    </div>
 
     <div class="markdown-body" v-html="rendered"></div>
 
@@ -70,12 +60,6 @@ function shortDate(iso: string): string {
 .ad-title { margin: 0 0 8px; font-size: 26px; line-height: 1.3; }
 .ad-meta { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--muted); margin-bottom: 14px; }
 .am b { font-weight: 400; margin-right: 2px; }
-.stars { color: #f59e0b; }
-.ad-summary {
-  font-size: 14px; color: var(--text); background: var(--primary-soft);
-  border-left: 3px solid var(--primary); padding: 10px 14px; border-radius: 8px; margin-bottom: 16px;
-}
-.as-label { font-weight: 600; color: var(--primary-dark); margin-right: 8px; }
 .ad-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .ad-tag {
   font-size: 12px; padding: 4px 12px; border-radius: 999px;

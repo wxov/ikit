@@ -59,12 +59,7 @@ export class SqliteStore implements KnowledgeStore {
         embedding TEXT,
         cover TEXT,
         views INTEGER NOT NULL DEFAULT 0,
-        rating INTEGER,
-        likes INTEGER NOT NULL DEFAULT 0,
         status TEXT,
-        summary TEXT,
-        history TEXT,
-        share_token TEXT,
         visibility TEXT,
         visible_groups TEXT
       );
@@ -92,12 +87,7 @@ export class SqliteStore implements KnowledgeStore {
     addCol('sort_order', 'INTEGER')
     addCol('cover', 'TEXT')
     addCol('views', 'INTEGER NOT NULL DEFAULT 0')
-    addCol('rating', 'INTEGER')
-    addCol('likes', 'INTEGER NOT NULL DEFAULT 0')
     addCol('status', 'TEXT')
-    addCol('summary', 'TEXT')
-    addCol('history', 'TEXT')
-    addCol('share_token', 'TEXT')
     addCol('visibility', 'TEXT')
     addCol('visible_groups', 'TEXT')
   }
@@ -120,12 +110,7 @@ export class SqliteStore implements KnowledgeStore {
       embedding: r.embedding ? JSON.parse(r.embedding) : undefined,
       cover: r.cover ?? undefined,
       views: r.views ?? undefined,
-      rating: r.rating ?? undefined,
-      likes: r.likes ?? undefined,
       status: (r.status as KnowledgeEntry['status']) || undefined,
-      summary: r.summary ?? undefined,
-      history: r.history ? JSON.parse(r.history) : undefined,
-      shareToken: r.share_token ?? undefined,
       visibility: (r.visibility as KnowledgeEntry['visibility']) || undefined,
       visibleGroups: r.visible_groups ? JSON.parse(r.visible_groups) : undefined,
     }))
@@ -160,8 +145,8 @@ export class SqliteStore implements KnowledgeStore {
       this.db.exec('DELETE FROM categories')
       this.db.exec('DELETE FROM comments')
       const ins = this.db.prepare(`
-        INSERT INTO entries (id, title, content, tags, category, parent_id, sort_order, pinned, created_at, updated_at, deleted_at, embedding, cover, views, rating, likes, status, summary, history, share_token, visibility, visible_groups)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO entries (id, title, content, tags, category, parent_id, sort_order, pinned, created_at, updated_at, deleted_at, embedding, cover, views, status, visibility, visible_groups)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       for (const e of data.entries) {
         ins.run(
@@ -179,12 +164,7 @@ export class SqliteStore implements KnowledgeStore {
           e.embedding ? JSON.stringify(e.embedding) : null,
           e.cover ?? null,
           e.views ?? 0,
-          e.rating ?? null,
-          e.likes ?? 0,
           e.status ?? null,
-          e.summary ?? null,
-          e.history ? JSON.stringify(e.history) : null,
-          e.shareToken ?? null,
           e.visibility ?? null,
           e.visibleGroups ? JSON.stringify(e.visibleGroups) : null,
         )

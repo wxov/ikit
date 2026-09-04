@@ -1,12 +1,5 @@
 import { apiUrl, wsUrl } from './config'
 
-export interface EntryVersion {
-  version: number
-  title: string
-  content: string
-  updatedAt: string
-}
-
 export type EntryVisibility = 'public' | 'login' | 'groups' | 'private'
 
 export interface KnowledgeEntry {
@@ -19,13 +12,8 @@ export interface KnowledgeEntry {
   sortOrder?: number
   pinned?: boolean
   status?: 'draft' | 'published' | 'archived'
-  history?: EntryVersion[]
-  summary?: string
-  rating?: number
-  likes?: number
   views?: number
   cover?: string
-  shareToken?: string
   visibility?: EntryVisibility
   visibleGroups?: string[]
   createdAt: string

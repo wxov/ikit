@@ -198,11 +198,6 @@ function prev() {
 function next() {
   if (page.value < totalPages.value) page.value++
 }
-
-function star(n: number | undefined): string {
-  const s = Math.round(n ?? 0)
-  return '★'.repeat(s) + '☆'.repeat(5 - s)
-}
 </script>
 
 <template>
@@ -261,8 +256,6 @@ function star(n: number | undefined): string {
             <span class="cf-item">📂 {{ e.category || '未分类' }}</span>
             <span class="cf-item">🕑 {{ shortDate(e.updatedAt) }}</span>
             <span v-if="e.views" class="cf-item">👁 {{ e.views }}</span>
-            <span v-if="e.likes" class="cf-item">👍 {{ e.likes }}</span>
-            <span v-if="e.rating" class="cf-item stars">{{ star(e.rating) }}</span>
           </div>
         </article>
       </div>
@@ -372,7 +365,6 @@ function star(n: number | undefined): string {
   color: var(--muted);
 }
 .cf-item { white-space: nowrap; }
-.cf-item.stars { color: #f59e0b; }
 .feed-pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 22px; }
 .pager-btn {
   border: 1px solid var(--border);

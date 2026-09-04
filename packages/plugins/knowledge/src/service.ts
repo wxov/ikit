@@ -239,19 +239,6 @@ export function createKnowledgeService(
         visibleGroups = patch.visibility === 'groups' ? patch.visibleGroups : undefined
       }
 
-      // 版本历史：标题或内容变化时保存旧版本
-      if (newTitle !== prev.title || newContent !== prev.content) {
-        const history = prev.history ?? []
-        history.unshift({
-          version: (history[0]?.version ?? 0) + 1,
-          title: prev.title,
-          content: prev.content,
-          updatedAt: prev.updatedAt,
-        })
-        if (history.length > 20) history.length = 20
-        prev.history = history
-      }
-
       const entry: KnowledgeEntry = {
         ...prev,
         title: newTitle,

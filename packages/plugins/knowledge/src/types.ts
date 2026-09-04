@@ -1,11 +1,3 @@
-/** 版本历史记录 */
-export interface EntryVersion {
-  version: number
-  title: string
-  content: string
-  updatedAt: string
-}
-
 /** 文章可见性级别 */
 export type EntryVisibility = 'public' | 'login' | 'groups' | 'private'
 
@@ -32,20 +24,10 @@ export interface KnowledgeEntry {
   pinned?: boolean
   /** 文档状态：草稿 / 已发布 / 已归档 */
   status?: 'draft' | 'published' | 'archived'
-  /** 版本历史（旧版本，最新的在前） */
-  history?: EntryVersion[]
-  /** AI 生成的摘要 */
-  summary?: string
-  /** 星级评分（1-5） */
-  rating?: number
-  /** 点赞数 */
-  likes?: number
   /** 访问/浏览量 */
   views?: number
   /** 封面图 URL（可选；未设置时前端用正文首图或渐变兜底） */
   cover?: string
-  /** 外部分享令牌 */
-  shareToken?: string
   /** 文章可见性：public=公开 / login=仅登录 / groups=指定组 / private=仅站主；缺省视为 public */
   visibility?: EntryVisibility
   /** visibility='groups' 时的可见组 id 列表 */

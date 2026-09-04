@@ -495,29 +495,6 @@ select {
   border-left-color: #fbbf24 !important;
 }
 
-[data-theme='dark'] .summary-row {
-  background: #1a1d23 !important;
-}
-
-[data-theme='dark'] .summary-text {
-  color: #e5e7eb !important;
-}
-
-[data-theme='dark'] .summary-label {
-  color: #9ca3af !important;
-}
-
-[data-theme='dark'] .summary-box {
-  background: transparent !important;
-}
-
-/* 确保摘要框内所有文字暗色下为浅色 */
-[data-theme='dark'] .summary-row,
-[data-theme='dark'] .summary-box,
-[data-theme='dark'] .summary-text {
-  color: #e5e7eb !important;
-}
-
 /* 暗色下输入框 placeholder */
 [data-theme='dark'] input::placeholder,
 [data-theme='dark'] textarea::placeholder {
