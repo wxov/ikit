@@ -17,7 +17,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const r = await api<{ entries: KnowledgeEntry[] }>('/api/knowledge/trash')
+    const r = await api<{ entries: KnowledgeEntry[] }>('/api/knowledge/trash', { headers: authHeaders() })
     entries.value = r.entries || []
   } catch (e: any) {
     error.value = e.message

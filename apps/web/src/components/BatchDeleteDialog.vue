@@ -67,6 +67,7 @@ async function confirm() {
 </script>
 
 <template>
+  <Teleport to="body">
   <div class="bd-overlay" @click.self="!busy && emit('close')">
     <div class="bd-modal">
       <h3>🗑 确认批量删除</h3>
@@ -92,11 +93,12 @@ async function confirm() {
       </div>
     </div>
   </div>
+  </Teleport>
 </template>
 
 <style scoped>
 .bd-overlay {
-  position: fixed; inset: 0; z-index: 60;
+  position: fixed; inset: 0; z-index: 700;
   background: rgba(15, 23, 42, 0.45);
   display: flex; align-items: center; justify-content: center; padding: 16px;
 }

@@ -106,6 +106,7 @@ onMounted(loadDocs)
 </script>
 
 <template>
+  <Teleport to="body">
   <div class="bm-overlay" @click.self="!busy && emit('close')">
     <div class="bm-modal">
       <h3>⇅ 批量移动 {{ ids.length }} 项</h3>
@@ -134,11 +135,12 @@ onMounted(loadDocs)
       </div>
     </div>
   </div>
+  </Teleport>
 </template>
 
 <style scoped>
 .bm-overlay {
-  position: fixed; inset: 0; z-index: 60;
+  position: fixed; inset: 0; z-index: 700;
   background: rgba(15, 23, 42, 0.45);
   display: flex; align-items: center; justify-content: center; padding: 16px;
 }
