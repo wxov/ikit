@@ -88,6 +88,62 @@ function collectDescendants(db: KnowledgeDb, rootId: string): KnowledgeEntry[] {
   return out
 }
 
+/** 批量操作单次上限（与路由层 MAX_BATCH_IDS、批量导入上限一致） */
+export const MAX_BATCH_IDS = 500
+
+/**
+ * 批量操作入参归一化：去重（保留首次出现顺序）+ 类型/空值/上限校验。
+ * 校验在**任何写入之前**完成——非法入参直接抛错，不产生半成品数据。
+ */
+function normalizeBatchIds(ids: string[]): string[] {
+  if (!Array.isArray(ids)) throw new Error('ids 必须是字符串数组')
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const id of ids) {
+    if (typeof id !== 'string') throw new Error('ids 必须是字符串数组')
+    const v = id.trim()
+    if (!v || seen.has(v)) continue
+    seen.add(v)
+    out.push(v)
+  }
+  if (!out.length) throw new Error('未选择任何条目')
+  if (out.length > MAX_BATCH_IDS) throw new Error(`单次最多处理 ${MAX_BATCH_IDS} 条`)
+  return out
+}
+
+/**
+ * 折叠嵌套选择：若某选中项的**祖先也在选中集合中**，则该项随祖先级联处理，不再单独处理
+ * （避免重复计数 / 重复写入）。返回值为「根级」条目，顺序与入参一致。
+ */
+function foldNestedSelection(
+  db: KnowledgeDb,
+  targets: KnowledgeEntry[],
+  idSet: Set<string>,
+): KnowledgeEntry[] {
+  const byId = new Map(db.entries.map((e) => [e.id, e]))
+  return targets.filter((e) => {
+    const seen = new Set<string>([e.id])
+    let cur = e.parentId ? byId.get(e.parentId) : undefined
+    while (cur && !seen.has(cur.id)) {
+      if (idSet.has(cur.id)) return false
+      seen.add(cur.id)
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined
+    }
+    return true
+  })
+}
+
+/** 环校验：`targetId` 是否为 `rootId` 自身或其子孙（自环 / 逆向挂载一律拒绝） */
+function isSelfOrDescendant(db: KnowledgeDb, rootId: string, targetId: string): boolean {
+  if (rootId === targetId) return true
+  return collectDescendants(db, rootId).some((d) => d.id === targetId)
+}
+
+/** 归一化目标父级 id：非空字符串 → trim 后的 id；空串 / null / undefined → 顶层 */
+function normalizeParentId(parentId: string | null | undefined): string | undefined {
+  return typeof parentId === 'string' && parentId.trim() ? parentId.trim() : undefined
+}
+
 // 把分类路径（含父级）加入分类列表
 function ensureCategory(db: KnowledgeDb, path: string) {
   if (!path) return
@@ -341,11 +397,113 @@ export function createKnowledgeService(
       return true
     },
 
+    /**
+     * 批量软删除（站主）：**级联**软删除选中项及其全部子孙（进回收站，可逐条恢复）。
+     *
+     * 先整体校验、后写入——任一条目不存在 / 已在回收站 / 入参非法（类型、空、>500）都在写入前抛错，
+     * 因此**全成功或全失败**，不会留下半成品数据。嵌套选择（父与子同时选中）折叠为按根处理：
+     * 子项由根级联覆盖，不计入 `deleted`。写库只落盘一次，事件按受影响条目逐条广播。
+     */
+    async batchRemove(ids) {
+      const unique = normalizeBatchIds(ids)
+      const db = await store.load()
+      const idSet = new Set(unique)
+      const targets = db.entries.filter((e) => idSet.has(e.id) && !e.deletedAt)
+      if (targets.length !== unique.length) {
+        throw new Error('部分条目不存在或已在回收站，请刷新后重试')
+      }
+      const roots = foldNestedSelection(db, targets, idSet)
+      // 受影响集合 = 各根 + 其全部子孙（根之间不会互相嵌套，用 seen 兜底去重）
+      const affected: KnowledgeEntry[] = []
+      const seen = new Set<string>()
+      for (const root of roots) {
+        if (!seen.has(root.id)) {
+          seen.add(root.id)
+          affected.push(root)
+        }
+        for (const d of collectDescendants(db, root.id)) {
+          if (seen.has(d.id)) continue
+          seen.add(d.id)
+          affected.push(d)
+        }
+      }
+      const now = new Date().toISOString()
+      for (const e of affected) {
+        e.deletedAt = now
+        e.updatedAt = now
+      }
+      await store.save()
+      await refreshFuse()
+      for (const e of affected) emitChange('remove', e)
+      return { deleted: roots.length, affectedIds: affected.map((e) => e.id) }
+    },
+
+    /**
+     * 批量移动（站主）：把选中项整体挂到 `parentId` 下（`null`/空 = 顶层），**分类保持不变**。
+     *
+     * 先整体校验、后写入：目标必须存在且未删除；目标不得是选中项自身、也不得是任一选中项的子孙
+     * （**服务端环校验**，杜绝把父挂到自己的子树下造成环）；任一条目不存在 / 已删除 → 抛错（全失败、零写入）。
+     * 嵌套选择折叠为按根处理（子孙随祖先移动，不重复设置）。序号在**目标层追加到末尾**：目标层 `sortOrder`
+     * 归一化（既有同层条目按原相对顺序重排为 0..k-1，被移动项接着排 k..k+m-1，连续且无并列）。
+     */
+    async batchMove(ids, parentId) {
+      const unique = normalizeBatchIds(ids)
+      const db = await store.load()
+      const pid = normalizeParentId(parentId)
+      const idSet = new Set(unique)
+      const targets = db.entries.filter((e) => idSet.has(e.id) && !e.deletedAt)
+      if (targets.length !== unique.length) {
+        throw new Error('部分条目不存在或已在回收站，请刷新后重试')
+      }
+      if (pid) {
+        const parent = db.entries.find((e) => e.id === pid && !e.deletedAt)
+        if (!parent) throw new Error('目标父文档不存在或已在回收站')
+        if (idSet.has(pid)) throw new Error('不能移动到自身或其子文档下')
+        for (const t of targets) {
+          if (isSelfOrDescendant(db, t.id, pid)) {
+            throw new Error('不能移动到自身或其子文档下')
+          }
+        }
+      }
+      const roots = foldNestedSelection(db, targets, idSet)
+      const moving = new Set(roots.map((r) => r.id))
+      // 目标层归一化 + 追加到末尾：既有同层条目按原相对顺序（sortOrder → createdAt）重排为 0..k-1，
+      // 被移动项接着排 k..k+m-1（连续、无并列）。同层既有条目的 sortOrder 属排序簿记（同上 `reorder`），
+      // 不更新 updatedAt、不单独广播（受影响条目 = 被移动项，见 `affectedIds`）。
+      const siblings = db.entries
+        .filter((e) => !e.deletedAt && (e.parentId || undefined) === pid && !moving.has(e.id))
+        .sort(
+          (a, b) =>
+            (a.sortOrder ?? 1e9) - (b.sortOrder ?? 1e9) || a.createdAt.localeCompare(b.createdAt),
+        )
+      let next = 0
+      for (const s of siblings) s.sortOrder = next++
+      const now = new Date().toISOString()
+      for (const r of roots) {
+        r.parentId = pid
+        r.sortOrder = next++
+        r.updatedAt = now
+      }
+      await store.save()
+      await refreshFuse()
+      for (const r of roots) emitChange('update', r)
+      return { moved: roots.length, affectedIds: roots.map((r) => r.id) }
+    },
+
+    // 单个移动：`parentId` 为空 = 顶层。**服务端环校验**（前端仅做提示，不构成约束）：
+    // 不能移动到自身或其子孙下（否则子树成环、目录树将无限递归）；目标必须存在且未删除。
+    // 校验不通过 → 抛错（路由层转 400），目标不变。
     async moveDoc(id, parentId) {
       const db = await store.load()
       const entry = db.entries.find((e) => e.id === id && !e.deletedAt)
       if (!entry) return undefined
-      const pid = parentId || undefined
+      const pid = normalizeParentId(parentId)
+      if (pid) {
+        if (pid === id) throw new Error('不能移动到自身或其子文档下')
+        const parent = db.entries.find((e) => e.id === pid && !e.deletedAt)
+        if (!parent) throw new Error('目标父文档不存在或已在回收站')
+        if (isSelfOrDescendant(db, id, pid)) throw new Error('不能移动到自身或其子文档下')
+      }
       entry.parentId = pid
       // 移动到目标末尾
       entry.sortOrder = db.entries.filter(

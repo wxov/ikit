@@ -11,6 +11,10 @@ const props = defineProps<{
   depth: number
   selectedId: string
   batchMode: boolean
+  /** 批量模式：已勾选的条目 id（被选中的根，勾选父级时其子孙不入集合） */
+  batchSelected?: Set<string>
+  /** 批量模式：随父级处理的条目 id（祖先已勾选 → 禁用单独勾选、并标记提示） */
+  batchCascade?: Set<string>
   searchQ: string
   expandedDocs: Record<string, boolean>
   menuFor: string
@@ -58,6 +62,14 @@ function onRowClick() {
   else if (props.movePickMode) emit('pickMoveTarget', props.node.entry.id)
   else emit('select', props.node.entry.id)
 }
+
+// 批量模式：勾选态 / 随父级处理态（祖先已选 → 由祖先级联覆盖，不单独勾选）
+function isChecked(id: string): boolean {
+  return !!props.batchSelected?.has(id)
+}
+function isCascade(id: string): boolean {
+  return !!props.batchCascade?.has(id)
+}
 </script>
 
 <template>
@@ -83,9 +95,27 @@ function onRowClick() {
       @dragend="emit('dragEnd')"
     >
       <div class="doc-item-row">
-        <div v-if="batchMode" class="kb-check" @click.stop="emit('toggleSelect', node.entry.id)"></div>
+        <!-- 批量模式复选框：随父级处理的条目禁用并显示提示（不破坏拖拽 / 菜单 / 单条选中逻辑） -->
+        <div
+          v-if="batchMode && !isCascade(node.entry.id)"
+          class="kb-check"
+          :class="{ on: isChecked(node.entry.id) }"
+          :title="isChecked(node.entry.id) ? '取消选择' : '选择'"
+          @click.stop="emit('toggleSelect', node.entry.id)"
+        >
+          {{ isChecked(node.entry.id) ? '✓' : '' }}
+        </div>
+        <div
+          v-else-if="batchMode"
+          class="kb-check disabled"
+          title="随父级处理（父级已选中，无需单独勾选）"
+          @click.stop
+        >
+          ·
+        </div>
+        <!-- 展开箭头：批量模式下仍可折叠 / 展开（不改变非批量模式的渲染） -->
         <span
-          v-else-if="!hideToggle && node.children.length"
+          v-if="!hideToggle && node.children.length"
           class="doc-tree-arrow"
           :class="{ open: expandedDocs[node.entry.id] }"
           @click.stop="emit('toggle', node.entry.id)"
@@ -96,6 +126,7 @@ function onRowClick() {
           <div class="doc-item-title">
             <span v-if="node.entry.pinned" class="pin-icon">📌</span>
             <span v-html="props.highlight(node.entry.title, searchQ)"></span>
+            <span v-if="batchMode && isCascade(node.entry.id)" class="kb-cascade">随父级处理</span>
           </div>
         </div>
         <!-- hover 操作（仅站主） -->
@@ -123,6 +154,8 @@ function onRowClick() {
         :depth="depth + 1"
         :selected-id="selectedId"
         :batch-mode="batchMode"
+        :batch-selected="batchSelected"
+        :batch-cascade="batchCascade"
         :search-q="searchQ"
         :expanded-docs="expandedDocs"
         :menu-for="menuFor"

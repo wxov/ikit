@@ -464,6 +464,12 @@ function onDocsImported(payload?: { count?: number; parentId?: string }) {
   docTreeKey.value++
   dataKey.value++
 }
+// 目录树批量删除 / 批量移动成功（站主）：目录树自身已 load()，这里刷新卡片流与右栏 + 轻提示
+function onDocTreeChanged(payload?: { message?: string }) {
+  if (payload?.message) showAppToast(payload.message)
+  loadCategories()
+  dataKey.value++
+}
 function submitGlobalSearch() {
   if (!globalQ.value.trim()) return
   tab.value = HOME_TAB
@@ -758,6 +764,7 @@ onUnmounted(() => {
                 @open="onOpenEntry"
                 @edit="enterEdit"
                 @create-child="enterNew"
+                @changed="onDocTreeChanged"
               />
             </div>
           </div>

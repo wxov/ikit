@@ -169,7 +169,8 @@ export function apply(ctx: Context, config: Config) {
 - **条目管理**：创建 / 列表（分页 + 可见性过滤）/ 更新
 - **批量导入**：`importMany()`（站主）——一次写入多条（≤500），与 `create()` 同一构造逻辑（分类补全 / sortOrder / 向量化 / `knowledge:changed`），末尾单次落盘；前端支持选文件或整个文件夹导入（子目录 → 分类，顶层目录 → 标签），并可**选择 / 新建挂载父文档**（`POST /api/knowledge/import` 的 body 顶层 `parentId`，条目自带 `parentId` 优先）。挂载语义：子项挂到父档下、同级 `sortOrder` 追加末尾；条目未显式指定可见性时**继承父档可见性**；条目无分类时**继承父档 `category`**（仅导入路径填充）；父档不存在 / 已软删除 → `400 parent not found` 且**零写入**（校验先于写入）
 - **混合检索**：Fuse.js 模糊搜索 + 停用词过滤的关键词子串匹配 +（配置 embedding 时的）向量余弦相似度，三者去重融合排序
-- **文档树**：`parentId`/`sortOrder` 层级 + 拖拽排序/移动（moveDoc / reorder）+ 置顶（`pinned`）
+- **文档树**：`parentId`/`sortOrder` 层级 + 拖拽排序/移动（moveDoc / reorder）+ 置顶（`pinned`）。移动含**服务端环校验**（不能移动到自身或其子孙下、目标须存在且未删除 → 400，目标不变）
+- **目录树批量操作（站主）**：`batchRemove()` 级联软删除（选中项 + 全部子孙一起进回收站，可恢复；**不提供彻底删除**）、`batchMove()` 批量移动（目标含「顶层」，目标层 `sortOrder` 归一化后追加末尾、**分类不变**、子孙随父级跟随）。两者均**先整体校验、后写入**（不存在 / 已删除 / 目标已删 / 环 / 类型 / 空 / >500 → 400 且**零写入**）、去重 + 折叠嵌套选择（父与子同选只按父处理）、单次落盘 + 逐条 `knowledge:changed` 广播
 - **分类**：路径式层级（如 `技术/前端`），从条目派生；添加分类（父级自动补全）+ 批量归类 + 计数
 - **回收站**：软删除 → 恢复 / 彻底删除 / 清空
 - **评论**：单条评论/回复 + 全站最新评论（列表过滤不可见文章）
@@ -328,9 +329,11 @@ node scripts/sign-plugin.mjs --zip tmp/hello-signed.zip --print-hash
 | POST | `/api/knowledge/entries/:id/comments` | 发评论（登录） |
 | DELETE | `/api/knowledge/comments/:id` | 删评论（作者/站主） |
 | GET | `/api/knowledge/comments?limit=` | 全站最新评论 |
-| POST | `/api/knowledge/entries/:id/move` | 移动文档（站主） |
+| POST | `/api/knowledge/entries/:id/move` | 移动文档（站主，`{parentId}`，`null`=顶层）。**服务端环校验**：不能移动到自身或其子孙下、目标不存在/已软删除 → `400 {error}` 且目标不变 |
 | POST | `/api/knowledge/reorder` | 同级排序（站主） |
 | DELETE | `/api/knowledge/entries/:id` | 软删除 → 回收站（站主） |
+| POST | `/api/knowledge/batch-delete` | **批量软删除（站主，`{ids:string[]}`，≤500）**：级联删除选中项及其**全部子孙**（进回收站、可逐条恢复；不提供彻底删除）。去重 + 折叠嵌套选择（父与子同选按父处理，返回 `deleted`=根数、`affectedIds`=全部受影响条目）；任一条目不存在/已删除 → `400 {error}` 且**零写入** |
+| POST | `/api/knowledge/batch-move` | **批量移动（站主，`{ids:string[], parentId?:string\|null}`）**：`parentId` 省略/`null`/空串 = 顶层；目标须存在且未删除；**服务端环校验**（目标不得是选中项自身或其子孙）；嵌套选择折叠（子孙随祖先移动）；目标层 `sortOrder` **归一化后追加到末尾**（连续、无并列）；**分类不变**。非法入参/目标/环 → `400 {error}` 且**零写入** |
 | POST | `/api/knowledge/entries/:id/toggle-pin` | 置顶（站主） |
 | GET | `/api/knowledge/trash` | 回收站（站主） |
 | POST | `/api/knowledge/trash/:id/restore` | 恢复（站主） |

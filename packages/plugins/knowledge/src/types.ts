@@ -125,7 +125,27 @@ export interface KnowledgeService {
     patch: Partial<KnowledgeEntryInput>,
     opts?: { skipEmbedding?: boolean },
   ): Promise<KnowledgeEntry | undefined>
+  /**
+   * 移动单个文档（站主）。`parentId` 为空 = 顶层。
+   * **服务端环校验**：不能移动到自身或其子孙下；目标必须存在且未删除 → 否则抛错。
+   */
   moveDoc(id: string, parentId: string | undefined | null): Promise<KnowledgeEntry | undefined>
+  /**
+   * 批量软删除（站主，级联）：连同选中项的全部子孙一起软删除（进回收站，可恢复）。
+   * 先整体校验后写入（不存在 / 已删除 / 类型 / 空 / >500 → 抛错，零写入）；嵌套选择折叠为按根处理。
+   * 返回根数（`deleted`）与全部受影响条目 id（`affectedIds`，含子孙）。
+   */
+  batchRemove(ids: string[]): Promise<{ deleted: number; affectedIds: string[] }>
+  /**
+   * 批量移动（站主）：`parentId` 为空 = 顶层；目标须存在且未删除；**服务端环校验**（目标不得是
+   * 选中项自身或其子孙）；嵌套选择折叠为按根处理（子孙随祖先移动）；目标层 `sortOrder` 归一化后
+   * 追加到末尾；分类不变。先整体校验后写入（任一条目不合法 → 抛错，零写入）。
+   * 返回移动的根数（`moved`）与 id（`affectedIds`）。
+   */
+  batchMove(
+    ids: string[],
+    parentId?: string | null,
+  ): Promise<{ moved: number; affectedIds: string[] }>
   reorder(parentId: string | undefined | null, orderedIds: string[]): Promise<{ updated: number }>
   remove(id: string): Promise<boolean>
   togglePin(id: string): Promise<KnowledgeEntry | undefined>

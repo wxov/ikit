@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { api, type CategoryNode, type EntryVisibility, type KnowledgeEntry } from '../lib/api'
 import { authHeaders, listGroups, type Group } from '../lib/auth'
+import DocParentPicker from './DocParentPicker.vue'
 
 // 批量导入文档（站主）：本地解析 .md/.markdown → POST /api/knowledge/import
 // 支持选择「导入到」的父文档（可搜索层级下拉，默认顶层）与新建父文档（标题/分类/可见性）
@@ -38,9 +39,9 @@ const error = ref('')
 const result = ref('')
 
 // ---- 导入到：父文档选择 ----
+// 下拉本体（含「顶层」/搜索/清空）已抽为公共组件 `DocParentPicker.vue`（批量移动目标复用同一组件）；
+// 本组件只保留「完整路径」计算（供选择器候选与结果文案）与新建父文档子表单。
 const parentId = ref('')
-const parentQuery = ref('')
-const pickerOpen = ref(false)
 const allDocs = ref<DocEntry[]>([])
 const docById = computed(() => new Map(allDocs.value.map((e) => [e.id, e])))
 /** 由 parentId 关系回溯出完整路径标签，如 `技术笔记 / Vue / 组件` */
@@ -60,27 +61,9 @@ const docOptions = computed(() =>
     .map((e) => ({ id: e.id, path: pathOf(e.id) }))
     .sort((a, b) => a.path.localeCompare(b.path, 'zh')),
 )
-const PICKER_LIMIT = 100
-const filteredDocs = computed(() => {
-  const q = parentQuery.value.trim().toLowerCase()
-  const list = q ? docOptions.value.filter((d) => d.path.toLowerCase().includes(q)) : docOptions.value
-  return list.slice(0, PICKER_LIMIT)
-})
-const truncated = computed(
-  () => !parentQuery.value.trim() && docOptions.value.length > PICKER_LIMIT,
-)
 const parentLabel = computed(() =>
   parentId.value ? pathOf(parentId.value) || '已选父文档' : '顶层（无父文档）',
 )
-function pickParent(id: string) {
-  if (busy.value) return // 导入中禁止改挂载目标
-  parentId.value = id
-  parentQuery.value = ''
-  pickerOpen.value = false
-}
-function clearParent() {
-  pickParent('')
-}
 
 // ---- ＋ 新建父文档 ----
 const newOpen = ref(false)
@@ -167,8 +150,6 @@ async function createParent() {
       catPaths.value = [...catPaths.value, r.entry.category]
     }
     parentId.value = r.entry.id // 创建成功 → 自动选中为新父级
-    parentQuery.value = ''
-    pickerOpen.value = false
     newOpen.value = false
     createNotice.value = `已新建父文档「${r.entry.title}」并选中为导入目标`
     npTitle.value = ''
@@ -292,54 +273,14 @@ onMounted(() => {
         未指定分类的条目在指定父文档时继承父文档分类，未指定可见性时继承父文档可见性。
       </p>
 
-      <!-- 导入到：父文档（可搜索层级下拉） -->
-      <div class="imp-target">
-        <div class="imp-target-head">
-          <span class="imp-target-label">导入到</span>
-          <span class="imp-target-cur" :title="parentLabel">{{ parentLabel }}</span>
-          <button v-if="parentId" class="imp-mini" :disabled="busy" @click="clearParent">清空</button>
+      <!-- 导入到：父文档（可搜索层级下拉，公共组件；行为与样式与抽取前一致） -->
+      <DocParentPicker v-model="parentId" :docs="docOptions" label="导入到" :disabled="busy">
+        <template #actions>
           <button class="imp-btn ghost sm" :disabled="busy" @click="newOpen = !newOpen; createNotice = ''">
             ＋ 新建父文档
           </button>
-        </div>
-        <div class="imp-picker">
-          <button class="imp-picker-btn" :disabled="busy" @click="pickerOpen = !pickerOpen">
-            <span class="imp-picker-txt">{{ parentLabel }}</span>
-            <span class="imp-caret">▾</span>
-          </button>
-          <div v-if="pickerOpen" class="imp-picker-mask" @click="pickerOpen = false"></div>
-          <div v-if="pickerOpen" class="imp-picker-pop">
-            <input
-              v-model="parentQuery"
-              class="imp-picker-search"
-              placeholder="搜索父文档标题 / 路径…"
-              autofocus
-            />
-            <div class="imp-picker-list">
-              <div class="imp-picker-opt" :class="{ on: !parentId }" @click="pickParent('')">
-                顶层（无父文档）
-              </div>
-              <div
-                v-for="d in filteredDocs"
-                :key="d.id"
-                class="imp-picker-opt"
-                :class="{ on: parentId === d.id }"
-                @click="pickParent(d.id)"
-              >
-                {{ d.path }}
-              </div>
-              <div v-if="parentQuery.trim() && !filteredDocs.length" class="imp-picker-empty">
-                无匹配文档
-              </div>
-              <div v-else-if="!docOptions.length" class="imp-picker-empty">暂无可选文档</div>
-              <div v-else-if="truncated" class="imp-picker-empty">
-                仅显示前 {{ PICKER_LIMIT }} 条，可输入关键字过滤（共 {{ docOptions.length }} 条）
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 新建父文档子表单 -->
+        </template>
+        <!-- 新建父文档子表单（默认插槽：与选择器同处一个边框卡片内，观感与抽取前一致） -->
         <div v-if="newOpen" class="imp-new">
           <div class="imp-new-row">
             <label class="imp-new-label">标题 *</label>
@@ -400,7 +341,7 @@ onMounted(() => {
           </div>
           <div v-if="createError" class="imp-error">❌ 新建父文档失败：{{ createError }}</div>
         </div>
-      </div>
+      </DocParentPicker>
 
       <div class="imp-actions">
         <button class="imp-btn" :disabled="busy" @click="triggerFile">📄 导入文件</button>
@@ -453,48 +394,7 @@ onMounted(() => {
   border-radius: 4px; padding: 0 4px; font-size: 12px;
 }
 /* ---- 导入到 ---- */
-.imp-target {
-  border: 1px solid var(--border); border-radius: 10px;
-  padding: 10px 12px; margin-bottom: 14px;
-}
-.imp-target-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.imp-target-label { font-size: 12px; font-weight: 700; color: var(--text); }
-.imp-target-cur {
-  font-size: 12px; color: var(--muted); flex: 1 1 120px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.imp-mini {
-  border: 1px solid var(--border); background: var(--panel); color: var(--muted);
-  border-radius: 6px; padding: 2px 8px; font-size: 12px; cursor: pointer; font-family: inherit;
-}
-.imp-picker { position: relative; margin-top: 8px; }
-.imp-picker-btn {
-  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  border: 1px solid var(--border); background: var(--panel); color: var(--text);
-  border-radius: 8px; padding: 7px 10px; font-size: 13px; cursor: pointer; font-family: inherit;
-  text-align: left;
-}
-.imp-picker-btn:disabled { opacity: 0.6; cursor: default; }
-.imp-picker-txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.imp-caret { color: var(--muted); font-size: 11px; }
-.imp-picker-mask { position: fixed; inset: 0; z-index: 1; }
-.imp-picker-pop {
-  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 2;
-  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18); padding: 8px;
-}
-.imp-picker-search {
-  width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px;
-  padding: 6px 8px; font-size: 13px; font-family: inherit;
-  background: var(--panel); color: var(--text); margin-bottom: 6px;
-}
-.imp-picker-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
-.imp-picker-opt {
-  padding: 6px 8px; border-radius: 6px; font-size: 13px; cursor: pointer;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.imp-picker-opt:hover { background: var(--primary-soft); }
-.imp-picker-opt.on { background: var(--primary-soft); color: var(--primary-dark); font-weight: 600; }
+/* 下拉本体（.dpp-*）已随公共组件 `DocParentPicker.vue` 抽取；此处仅保留本弹窗自用的提示样式 */
 .imp-picker-empty { font-size: 12px; color: var(--muted); padding: 6px 8px; }
 /* ---- 新建父文档 ---- */
 .imp-new {

@@ -7,6 +7,8 @@ import path from 'node:path'
 
 // 批量导入文档单次上限（超出直接 400，避免一次请求写入过多条目）
 const MAX_IMPORT_ENTRIES = 500
+// 批量删除 / 批量移动单次上限（与 knowledge 服务层 MAX_BATCH_IDS 一致）
+const MAX_BATCH_IDS = 500
 
 export interface ApiMeta {
   name?: string
@@ -125,6 +127,26 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
 
   function normalizeVisibility(v: string | undefined): EntryVisibility | null {
     return v === 'public' || v === 'login' || v === 'groups' || v === 'private' ? v : null
+  }
+
+  /**
+   * 批量接口 `ids` 入参校验（站主）：必须为非空字符串数组、元素非空、数量 ≤ MAX_BATCH_IDS。
+   * 校验不通过时已发送 400 并返回 null，调用方直接 return（不进入服务层写入）。
+   */
+  function parseBatchIds(reply: any, ids: unknown): string[] | null {
+    if (!Array.isArray(ids) || !ids.length) {
+      reply.code(400).send({ error: 'ids array is required' })
+      return null
+    }
+    if (ids.some((id) => typeof id !== 'string' || !id.trim())) {
+      reply.code(400).send({ error: 'ids must be non-empty strings' })
+      return null
+    }
+    if (ids.length > MAX_BATCH_IDS) {
+      reply.code(400).send({ error: `too many ids (max ${MAX_BATCH_IDS})` })
+      return null
+    }
+    return ids as string[]
   }
 
   // 注册已屏蔽（站主在用户管理手动建号）；保留登录/找回
@@ -698,13 +720,18 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   })
 
   // 移动文档到新的父文档（parentId 为空 = 移动到顶层）
+  // 服务端环校验在 service.moveDoc 内（自身 / 子孙 / 目标不存在或已删除 → 400，目标不变）
   app.post('/api/knowledge/entries/:id/move', (req, reply) =>
     requireAdmin(req, reply, async () => {
       const id = (req.params as { id: string }).id
       const body = req.body as { parentId?: string | null }
-      const entry = await ctx.knowledge.moveDoc(id, body?.parentId ?? undefined)
-      if (!entry) return reply.code(404).send({ error: 'entry not found' })
-      return { entry }
+      try {
+        const entry = await ctx.knowledge.moveDoc(id, body?.parentId ?? undefined)
+        if (!entry) return reply.code(404).send({ error: 'entry not found' })
+        return { entry }
+      } catch (e: any) {
+        return reply.code(400).send({ error: e?.message ?? 'move failed' })
+      }
     }),
   )
 
@@ -725,6 +752,44 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
       const ok = await ctx.knowledge.remove(id)
       if (!ok) return reply.code(404).send({ error: 'entry not found' })
       return { ok: true }
+    }),
+  )
+
+  // ---- 目录树批量操作（站主）----
+  // 批量软删除（级联）：连带选中项的全部子孙一起进回收站（可恢复）；不提供彻底删除。
+  // 服务层**先整体校验、后写入**（不存在 / 已删除 / 类型 / 空 / 上限 → 400 且零写入）。
+  app.post('/api/knowledge/batch-delete', (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      const body = req.body as { ids?: string[] }
+      const ids = parseBatchIds(reply, body?.ids)
+      if (!ids) return
+      try {
+        return await ctx.knowledge.batchRemove(ids)
+      } catch (e: any) {
+        return reply.code(400).send({ error: e?.message ?? 'batch delete failed' })
+      }
+    }),
+  )
+
+  // 批量移动（站主）：`parentId: null` / 省略 = 顶层；目标须存在且未删除；服务端环校验；
+  // 嵌套选择折叠为按根处理；目标层 sortOrder 追加末尾；分类不变。
+  app.post('/api/knowledge/batch-move', (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      const body = req.body as { ids?: string[]; parentId?: string | null }
+      if (
+        body?.parentId !== undefined &&
+        body?.parentId !== null &&
+        typeof body?.parentId !== 'string'
+      ) {
+        return reply.code(400).send({ error: 'parentId must be a string or null' })
+      }
+      const ids = parseBatchIds(reply, body?.ids)
+      if (!ids) return
+      try {
+        return await ctx.knowledge.batchMove(ids, body?.parentId ?? null)
+      } catch (e: any) {
+        return reply.code(400).send({ error: e?.message ?? 'batch move failed' })
+      }
     }),
   )
 

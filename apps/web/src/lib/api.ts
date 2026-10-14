@@ -57,6 +57,21 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * 把 `api()` 抛出的错误转成用户可读文案：响应体为 `{ error: '...' }` 时取其 `error`（服务端明确错误，
+ * 如「不能移动到自身或其子文档下」），否则原样返回。
+ */
+export function apiErrorMessage(e: unknown): string {
+  const raw = e instanceof Error ? e.message : String(e)
+  try {
+    const j = JSON.parse(raw) as { error?: string }
+    if (j?.error) return j.error
+  } catch {
+    /* 非 JSON：原样展示 */
+  }
+  return raw
+}
+
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const hasBody = options?.body != null
   const res = await fetch(apiUrl(path), {
