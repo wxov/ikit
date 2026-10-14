@@ -25,7 +25,7 @@ import type { KnowledgeStore } from './store.js'
  * ⚠️ **发布前必须由发布者确认/校正**：该值一旦改变，等价于数据迁移范围变更，需评审
  * （改小 → 部分历史草稿仍对游客不可见；改大 → 可能误伤上线后新产生的真实草稿，见方案 R10）。
  */
-export const DRAFT_PUBLISH_CUTOFF = '2026-10-20T00:00:00.000Z'
+export const DRAFT_PUBLISH_CUTOFF = '2026-10-14T05:29:24.000Z'
 
 /** 幂等标记键（写在 `KnowledgeDb.meta`，随存储文件一起备份/回滚） */
 export const DRAFT_PUBLISH_MARKER = 'draftPublishV1'
