@@ -1,0 +1,9 @@
+# Vditor 离线资源为第三方构建产物，由 scripts/sync-vditor-assets.mjs 从 node_modules 复制。
+# 声明为 -text（不做行尾转换），否则 git 的 CRLF 归一化会让每次 prebuild 后工作区出现「仅行尾」的脏文件。
+apps/web/public/vditor/** -text
+
+# 二进制/打包产物（如提交）：不做行尾转换、不参与文本 diff
+*.zip binary
+*.apk binary
+*.exe binary
+*.keystore binary
