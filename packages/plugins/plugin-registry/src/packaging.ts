@@ -11,6 +11,8 @@ import {
   normalizeRelPath,
   sha256OfFileTree,
 } from './utils.js'
+import { PLUGIN_ERR, PluginError } from './errors.js'
+import { parseSignatureComment, type SignatureEnvelope } from './signing.js'
 import type { PluginPackageManifest } from './loader.js'
 
 // ---- 大小/炸弹上限 ----
@@ -35,6 +37,13 @@ export interface ZipValidation {
   files: ExtractedFile[]
   /** 解压后文件树的规范序 sha256 */
   treeSha256: string
+  /**
+   * zip archive comment 中携带的签名信封（`ikit-plugin-signature:` 前缀）。
+   * 注意：comment **不是 zip 条目**，因此对 `files` 与 `treeSha256` 零影响（语义冻结）。
+   */
+  envelope?: SignatureEnvelope
+  /** comment 前缀匹配但信封非法时的错误说明（视为「签名不可用」而非「无签名」） */
+  envelopeError?: string
 }
 
 /** 将 base64 解码为 zip Buffer，并做原始大小上限校验（可容忍 data:…;base64, 前缀） */
@@ -151,19 +160,42 @@ export function validateZipBuffer(zipBuf: Buffer): ZipValidation {
     minVersion: typeof raw.minVersion === 'string' ? raw.minVersion : undefined,
   }
 
-  return { manifest, files, treeSha256: sha256OfFileTree(files) }
+  // 签名信封：读 zip archive comment（**不产生 zip 条目**，故 treeSha256 与 files 完全不受影响）
+  // 前缀不匹配 → 视为无签名（忽略第三方工具写入的普通 comment）；前缀匹配但非法 → 附 envelopeError
+  let envelope: SignatureEnvelope | undefined
+  let envelopeError: string | undefined
+  try {
+    const parsed = parseSignatureComment(zip.getZipComment())
+    envelope = parsed.envelope
+    envelopeError = parsed.error
+  } catch (e) {
+    envelopeError = `zip comment 读取失败：${e instanceof Error ? e.message : String(e)}`
+  }
+
+  return { manifest, files, treeSha256: sha256OfFileTree(files), envelope, envelopeError }
 }
 
-/** 校验可选 sha256（若提供）：与树哈希比对，不匹配抛错 */
+/** 校验可选 sha256（若提供）：与树哈希比对，不匹配抛带码错误（PLUGIN_SHA256_MISMATCH） */
 export function assertSha256(provided: string | undefined, treeSha256: string): void {
   if (!provided) return
-  if (String(provided).toLowerCase() !== treeSha256) {
-    throw new Error('sha256 校验失败')
+  const expect = String(provided).trim().toLowerCase()
+  if (expect !== treeSha256) {
+    throw new PluginError(
+      `sha256 校验失败：期望 ${expect.slice(0, 8)}…，实际 ${treeSha256.slice(0, 8)}…`,
+      PLUGIN_ERR.SHA256_MISMATCH,
+    )
   }
 }
 
-/** 将包目录打包为 zip Buffer（仅包目录内文件，排除无关目录） */
-export async function exportPackageToZip(pkgDir: string): Promise<Buffer> {
+/**
+ * 将包目录打包为 zip Buffer（仅包目录内文件，排除无关目录）。
+ * `opts.signatureComment`：写回 zip archive comment（= 签名信封，由 `buildSignatureComment` 保证单行 ASCII）。
+ * comment **不是 zip 条目** → 对 `sha256OfFileTree` 与既有校验链零影响（导出→导入闭环不丢签名）。
+ */
+export async function exportPackageToZip(
+  pkgDir: string,
+  opts?: { signatureComment?: string },
+): Promise<Buffer> {
   const root = path.resolve(pkgDir)
   let stat
   try {
@@ -192,5 +224,7 @@ export async function exportPackageToZip(pkgDir: string): Promise<Buffer> {
     }
   }
   await walk(root)
+  const comment = opts?.signatureComment
+  if (comment) zip.addZipComment(comment)
   return zip.toBuffer()
 }

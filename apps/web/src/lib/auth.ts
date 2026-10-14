@@ -61,8 +61,18 @@ export function logout(): Promise<{ ok: boolean }> {
 export function listUsers(): Promise<{ users: PublicUser[] }> {
   return api('/api/auth/users', { headers: authHeaders() })
 }
-export function createUser(username: string, password: string, role: 'user' | 'admin' = 'user'): Promise<{ user: PublicUser; users: PublicUser[] }> {
-  return api('/api/auth/users', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ username, password, role }) })
+export function createUser(
+  username: string,
+  password: string,
+  role: 'user' | 'admin' = 'user',
+  // 第 4 参 groupIds 与后端 POST /api/auth/users 一致（此前漏声明 → 创建用户时勾选的用户组被静默丢弃）
+  groupIds?: string[],
+): Promise<{ user: PublicUser; users: PublicUser[] }> {
+  return api('/api/auth/users', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ username, password, role, groupIds }),
+  })
 }
 export function disableUser(id: string, disabled: boolean): Promise<{ users: PublicUser[] }> {
   return api(`/api/auth/users/${id}/disable`, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ disabled }) })

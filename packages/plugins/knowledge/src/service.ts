@@ -41,15 +41,31 @@ function normalizePath(path: string): string {
   return path.trim().split('/').filter(Boolean).join('/')
 }
 
-// 可见性判定：admin 恒可见；否则按 visibility 级别判断
-function isVisible(entry: KnowledgeEntry, viewer: Viewer): boolean {
-  if (viewer.isAdmin) return true
-  const v = entry.visibility ?? 'public'
-  if (v === 'public') return true
-  if (v === 'private') return false
-  if (v === 'login') return !viewer.groups.includes('guest')
-  if (v === 'groups') return (entry.visibleGroups ?? []).some((g) => viewer.groups.includes(g))
-  return false
+/**
+ * 草稿可见性开关（方案 X）：
+ * - `admin-only`（默认）：非 admin 的读路径过滤掉未发布条目（草稿仅站主可见）；
+ * - `everyone`：完全等价历史行为（零过滤），用于一句话回滚。
+ */
+export type DraftVisibility = 'admin-only' | 'everyone'
+
+/** 发布态判定：`undefined` / `NULL` 视为 `published`（存量数据兼容，见方案 F1） */
+export function isPublished(entry: KnowledgeEntry): boolean {
+  return (entry.status ?? 'published') === 'published'
+}
+
+// 可见性判定工厂：admin 恒可见；非 admin 先过「发布态」再按 visibility 级别判断
+function makeIsVisible(draftVisibility: DraftVisibility) {
+  return function isVisible(entry: KnowledgeEntry, viewer: Viewer): boolean {
+    if (viewer.isAdmin) return true
+    // 方案 X：草稿仅站主可见（fail-closed，'archived' 同样视为未发布）
+    if (draftVisibility !== 'everyone' && !isPublished(entry)) return false
+    const v = entry.visibility ?? 'public'
+    if (v === 'public') return true
+    if (v === 'private') return false
+    if (v === 'login') return !viewer.groups.includes('guest')
+    if (v === 'groups') return (entry.visibleGroups ?? []).some((g) => viewer.groups.includes(g))
+    return false
+  }
 }
 
 function arraysEqual(a: string[], b: string[]): boolean {
@@ -122,7 +138,9 @@ export function createKnowledgeService(
   ctx: Context,
   store: KnowledgeStore,
   embed?: EmbedFn,
+  options?: { draftVisibility?: DraftVisibility },
 ): KnowledgeService {
+  const isVisible = makeIsVisible(options?.draftVisibility ?? 'admin-only')
   const fuse = new Fuse<KnowledgeEntry>([], {
     keys: ['title', 'content', 'tags'],
     includeScore: true,
@@ -160,47 +178,85 @@ export function createKnowledgeService(
     return db.categories
   }
 
+  /**
+   * 构造条目实体：`create` 与 `importMany` 共用，保证两条写入路径的分类补全、
+   * sortOrder、可见性继承等规范化逻辑完全一致（不会各自漂移）。
+   *
+   * `defaultStatus` 由**调用方**决定（完善⑦）：`create()` = `'draft'`（交互式新建走草稿流），
+   * `importMany()` = `'published'`（导入即可见）；`input.status` 显式传入时优先。
+   */
+  const buildEntry = (
+    db: KnowledgeDb,
+    input: KnowledgeEntryInput,
+    defaultStatus: 'draft' | 'published' = 'draft',
+  ): KnowledgeEntry => {
+    const now = new Date().toISOString()
+    const category = input.category?.trim() ? normalizePath(input.category) : undefined
+    if (category) ensureCategory(db, category)
+    // 可见性：显式指定优先；否则继承父文档（默认公开）
+    let visibility: EntryVisibility | undefined = input.visibility
+    let visibleGroups = input.visibleGroups
+    if (!visibility && input.parentId) {
+      const parent = db.entries.find((e) => e.id === input.parentId && !e.deletedAt)
+      if (parent) {
+        visibility = parent.visibility
+        visibleGroups = parent.visibleGroups
+      }
+    }
+    return {
+      id: randomUUID(),
+      title: input.title.trim(),
+      content: input.content ?? '',
+      tags: input.tags ?? [],
+      category,
+      parentId: input.parentId || undefined,
+      sortOrder: db.entries.filter(
+        (e) => !e.deletedAt && (e.parentId || undefined) === (input.parentId || undefined),
+      ).length,
+      status: input.status ?? defaultStatus,
+      cover: input.cover || undefined,
+      visibility: visibility && visibility !== 'public' ? visibility : undefined,
+      visibleGroups: visibility === 'groups' ? visibleGroups : undefined,
+      views: 0,
+      createdAt: now,
+      updatedAt: now,
+    }
+  }
+
   return {
     async create(input) {
       const db = await store.load()
       ensureCategories(db)
-      const now = new Date().toISOString()
-      const category = input.category?.trim() ? normalizePath(input.category) : undefined
-      if (category) ensureCategory(db, category)
-      // 可见性：显式指定优先；否则继承父文档（默认公开）
-      let visibility: EntryVisibility | undefined = input.visibility
-      let visibleGroups = input.visibleGroups
-      if (!visibility && input.parentId) {
-        const parent = db.entries.find((e) => e.id === input.parentId && !e.deletedAt)
-        if (parent) {
-          visibility = parent.visibility
-          visibleGroups = parent.visibleGroups
-        }
-      }
-      const entry: KnowledgeEntry = {
-        id: randomUUID(),
-        title: input.title.trim(),
-        content: input.content,
-        tags: input.tags ?? [],
-        category,
-        parentId: input.parentId || undefined,
-        sortOrder: db.entries.filter(
-          (e) => !e.deletedAt && (e.parentId || undefined) === (input.parentId || undefined),
-        ).length,
-        status: 'draft',
-        cover: input.cover || undefined,
-        visibility: visibility && visibility !== 'public' ? visibility : undefined,
-        visibleGroups: visibility === 'groups' ? visibleGroups : undefined,
-        views: 0,
-        createdAt: now,
-        updatedAt: now,
-      }
+      const entry = buildEntry(db, input)
       await vectorize(entry)
       db.entries.push(entry)
       await store.save()
       await refreshFuse()
       emitChange('create', entry)
       return entry
+    },
+
+    // 批量导入（站主）：逐条走与 create 相同的构造逻辑（分类补全 / sortOrder / 可见性继承 /
+    // 向量化 / 逐条 knowledge:changed 广播），但只在末尾保存一次 + 重建一次检索索引——
+    // 上限 500 条时避免 JSON/SQLite 反复全量落盘；跳过标题为空的条目（不计入 created）。
+    // **默认发布态为 published**（完善⑦：导入即可见，无需逐条手动发布）。
+    async importMany(items) {
+      const created: KnowledgeEntry[] = []
+      for (const input of items) {
+        if (typeof input?.title !== 'string' || !input.title.trim()) continue
+        const db = await store.load()
+        ensureCategories(db)
+        const entry = buildEntry(db, input, 'published')
+        await vectorize(entry)
+        db.entries.push(entry)
+        created.push(entry)
+      }
+      if (created.length) {
+        await store.save()
+        await refreshFuse()
+        for (const entry of created) emitChange('create', entry)
+      }
+      return { created: created.length, entries: created }
     },
 
     async list(options, viewer) {
@@ -214,7 +270,7 @@ export function createKnowledgeService(
       return active
     },
 
-    async update(id, patch) {
+    async update(id, patch, opts) {
       const db = await store.load()
       ensureCategories(db)
       const idx = db.entries.findIndex((e) => e.id === id)
@@ -228,8 +284,18 @@ export function createKnowledgeService(
           : prev.category
       if (category) ensureCategory(db, category)
 
-      const newTitle = patch.title?.trim() ?? prev.title
+      // 空标题回落原值（自动保存时标题可能尚未填写，不能把已有标题清空）
+      const newTitle = patch.title?.trim() || prev.title
       const newContent = patch.content ?? prev.content
+
+      // 发布态（完善⑦）：显式传入才变更；'archived' 不在白名单（由路由 400 拒绝）
+      const newStatus: KnowledgeEntry['status'] =
+        patch.status === 'draft' || patch.status === 'published' ? patch.status : prev.status
+
+      // 发布前置校验（服务端权威）：合并后 title/content 均需非空
+      if (newStatus === 'published' && (!newTitle.trim() || !newContent.trim())) {
+        throw new Error('发布前需填写标题与正文')
+      }
 
       // 可见性：显式传入才变更；'public' 归一化为未设置
       let visibility = prev.visibility
@@ -246,11 +312,14 @@ export function createKnowledgeService(
         tags: patch.tags ?? prev.tags,
         category,
         cover: patch.cover !== undefined ? patch.cover || undefined : prev.cover,
+        status: newStatus,
         visibility,
         visibleGroups,
         updatedAt: new Date().toISOString(),
       }
-      if (embed && (patch.title || patch.content)) {
+      // 自动保存路径（opts.skipEmbedding）跳过向量化：避免每 2s 一次外部 embedding 调用；
+      // 发布/撤回与手动保存不跳过 → 检索质量不受影响。
+      if (embed && !opts?.skipEmbedding && (patch.title || patch.content)) {
         await vectorize(entry)
       }
       db.entries[idx] = entry

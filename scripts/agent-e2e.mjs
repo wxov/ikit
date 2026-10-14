@@ -1,25 +1,81 @@
 // Agent 端到端验证：function-calling + 知识库 RAG
 // 运行：node scripts/agent-e2e.mjs（需先启动 server 并配置 LLM_API_KEY）
-const base = 'http://localhost:3000'
+// 说明（完善④）：原脚本调用的 POST /api/agent/chat 已随完善② 下线；现改为
+//   POST /api/agent/chat-stream（SSE）+ 登录态（知识库写入/删除与 Agent 接口均需登录）。
+const base = (process.env.BASE ?? 'http://localhost:3000').replace(/\/$/, '')
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? 'admin'
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? 'admin123'
 
-async function chat(message, history = []) {
-  const res = await fetch(`${base}/api/agent/chat`, {
+let token = ''
+
+async function login() {
+  const res = await fetch(`${base}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: ADMIN_USERNAME, password: ADMIN_PASSWORD }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`login ${res.status}: ${text}`)
+  }
+  const data = await res.json()
+  if (!data?.token) throw new Error('login 未返回 token')
+  return data.token
+}
+
+function authHeaders(extra = {}) {
+  return { Authorization: `Bearer ${token}`, ...extra }
+}
+
+/** 流式对话：聚合 SSE 事件为 { answer, steps } */
+async function chat(message, history = []) {
+  const res = await fetch(`${base}/api/agent/chat-stream`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ message, history }),
   })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`agent chat ${res.status}: ${text}`)
+    throw new Error(`agent chat-stream ${res.status}: ${text}`)
   }
-  return res.json()
+  const events = []
+  const raw = await res.text()
+  for (const line of raw.split(/\r?\n/)) {
+    const t = line.trim()
+    if (!t.startsWith('data:')) continue
+    const payload = t.slice(5).trim()
+    if (!payload) continue
+    try {
+      events.push(JSON.parse(payload))
+    } catch {
+      /* 忽略非 JSON 帧 */
+    }
+  }
+  const error = events.find((e) => e.type === 'error')
+  if (error) throw new Error(`agent 流式错误：${error.error}`)
+  const answer = events
+    .filter((e) => e.type === 'delta')
+    .map((e) => e.content)
+    .join('')
+  const steps = events
+    .filter((e) => e.type === 'tool')
+    .map((e) => ({ type: 'tool', toolName: e.toolName, toolArgs: e.toolArgs, toolResult: e.toolResult }))
+  return { answer, steps }
 }
 
 async function main() {
-  // 1. 清理旧数据并写入知识库测试条目
-  const existing = await (await fetch(`${base}/api/knowledge/entries`)).json()
-  for (const e of existing.entries) {
-    await fetch(`${base}/api/knowledge/entries/${e.id}`, { method: 'DELETE' })
+  token = await login()
+  console.log(`✅ 已登录 ${ADMIN_USERNAME}\n`)
+
+  // 1. 清理旧数据并写入知识库测试条目（知识库写接口需站主权限）
+  const existing = await (
+    await fetch(`${base}/api/knowledge/entries`, { headers: authHeaders() })
+  ).json()
+  for (const e of existing.entries ?? []) {
+    await fetch(`${base}/api/knowledge/entries/${e.id}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    })
   }
 
   const seed = [
@@ -37,15 +93,16 @@ async function main() {
     },
   ]
   for (const s of seed) {
-    await fetch(`${base}/api/knowledge/entries`, {
+    const res = await fetch(`${base}/api/knowledge/entries`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(s),
     })
+    if (!res.ok) throw new Error(`写入知识条目失败 ${res.status}: ${await res.text()}`)
   }
   console.log('✅ 已写入知识库测试条目 2 条\n')
 
-  // 2. RAG 验证：问题需要检索知识库
+  // 2. RAG 验证：问题需要检索知识库（admin 调用，可见全部条目）
   console.log('━━━ 提问：Cordis 是什么？请结合知识库回答。 ━━━')
   const r1 = await chat('Cordis 是什么？请结合知识库回答。')
   console.log('工具调用轨迹：')

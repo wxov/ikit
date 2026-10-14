@@ -5,6 +5,9 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
+// 批量导入文档单次上限（超出直接 400，避免一次请求写入过多条目）
+const MAX_IMPORT_ENTRIES = 500
+
 export interface ApiMeta {
   name?: string
   version?: string
@@ -113,6 +116,11 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
 
   async function resolveViewer(req: any): Promise<Viewer> {
     return viewerOf(await ctx.account.me(tokenOf(req)))
+  }
+
+  // user → Agent 调用上下文（完善④）：viewer 由「调用者」解析，与 HTTP 知识库接口同源
+  async function callOf(user: any) {
+    return { viewer: await viewerOf(user), userId: user?.id as string | undefined }
   }
 
   function normalizeVisibility(v: string | undefined): EntryVisibility | null {
@@ -324,9 +332,11 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   )
 
   // ---- 插件商店 ----
-  app.get('/api/plugin-store', async () => ({
-    store: ctx.pluginRegistry.store(),
-  }))
+  // 顶层附带签名策略与信任表 keyId 列表（完善⑥），供前端渲染徽标与门控
+  app.get('/api/plugin-store', async () => {
+    const info = ctx.pluginRegistry.signatureInfo()
+    return { store: ctx.pluginRegistry.store(), signatureMode: info.mode, trustedKeyIds: info.trustedKeyIds }
+  })
 
   app.get('/api/plugin-store/categories', async () => ({
     categories: ctx.pluginRegistry.categories(),
@@ -342,12 +352,15 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   app.post('/api/plugin-store/install', (req, reply) =>
     requireAdmin(req, reply, async () => {
       // 支持 { name }（沿用商店条目，catalog 假安装 / remote 真下载）或 { name, packageUrl, sha256 }（直接远端安装）
-      const body = req.body as { name?: string; packageUrl?: string; sha256?: string } | undefined
+      // 可选签名字段（signature/keyId/signedHash/signedAt）优先于包内 zip comment
+      const body = req.body as
+        | { name?: string; packageUrl?: string; sha256?: string; signature?: string; keyId?: string; signedHash?: string; signedAt?: string }
+        | undefined
       try {
-        const plugins = await ctx.pluginRegistry.install(body ?? {})
-        return { plugins, store: ctx.pluginRegistry.store() }
+        const { plugins, scan, signature } = await ctx.pluginRegistry.install(body ?? {})
+        return { plugins, store: ctx.pluginRegistry.store(), scan, signature }
       } catch (e: any) {
-        return reply.code(400).send({ error: e?.message || '安装失败' })
+        return reply.code(400).send({ error: e?.message || '安装失败', code: e?.code })
       }
     }),
   )
@@ -369,16 +382,28 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     }),
   )
 
-  // 导入插件包（zip base64 + 可选 sha256）；仅 admin，信任边界见文档
+  // 导入插件包（zip base64 + 可选 sha256 + 可选签名平铺字段）；仅 admin，信任边界见文档
   app.post('/api/plugin-store/import', { bodyLimit: 5 * 1024 * 1024 }, (req, reply) =>
     requireAdmin(req, reply, async () => {
-      const body = req.body as { data?: string; sha256?: string }
+      const body = req.body as {
+        data?: string
+        sha256?: string
+        signature?: string
+        keyId?: string
+        signedHash?: string
+        signedAt?: string
+      }
       if (!body?.data) return reply.code(400).send({ error: 'data is required' })
       try {
-        const plugins = await ctx.pluginRegistry.importPackage(body.data, body.sha256)
-        return { plugins, store: ctx.pluginRegistry.store() }
+        const { plugins, scan, signature } = await ctx.pluginRegistry.importPackage(
+          body.data,
+          body.sha256,
+          // 请求体签名字段可选覆盖 zip comment（缺省时由服务端读包内 comment）
+          { signature: body.signature, keyId: body.keyId, signedHash: body.signedHash, signedAt: body.signedAt },
+        )
+        return { plugins, store: ctx.pluginRegistry.store(), scan, signature }
       } catch (e: any) {
-        return reply.code(400).send({ error: e?.message || '导入失败' })
+        return reply.code(400).send({ error: e?.message || '导入失败', code: e?.code })
       }
     }),
   )
@@ -395,10 +420,10 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     requireAdmin(req, reply, async () => {
       const name = (req.params as { name: string }).name
       try {
-        const plugins = await ctx.pluginRegistry.update(name)
-        return { plugins, store: ctx.pluginRegistry.store() }
+        const { plugins, scan, signature } = await ctx.pluginRegistry.update(name)
+        return { plugins, store: ctx.pluginRegistry.store(), scan, signature }
       } catch (e: any) {
-        return reply.code(400).send({ error: e?.message || '更新失败' })
+        return reply.code(400).send({ error: e?.message || '更新失败', code: e?.code })
       }
     }),
   )
@@ -519,19 +544,35 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     }
   })
 
+  // 创建条目（站主）：草稿流放宽为「标题与正文不可同时为空」——
+  // 新建文章在详情页编辑态首次自动保存即创建，此时用户常先粘正文后补标题。
+  // 空标题回落「未命名草稿」（目录树/卡片有可读标签）。
+  // 发布不变式与 PATCH 对称：`status:'published'` 时必须填写标题与正文，否则 400（避免游客立刻看到空壳条目）。
   app.post('/api/knowledge/entries', (req, reply) =>
     requireAdmin(req, reply, async () => {
       const body = req.body as KnowledgeEntryInput
-      if (!body?.title?.trim() || !body?.content) {
-        return reply.code(400).send({ error: 'title and content are required' })
+      const title = typeof body?.title === 'string' ? body.title.trim() : ''
+      const content = typeof body?.content === 'string' ? body.content : ''
+      if (!title && !content.trim()) {
+        return reply.code(400).send({ error: 'title and content cannot both be empty' })
+      }
+      if (body?.status !== undefined && body.status !== 'draft' && body.status !== 'published') {
+        return reply.code(400).send({ error: "status must be 'draft' or 'published'" })
+      }
+      // 发布不变式（与 PATCH 对称，服务端权威）：直接以 status:'published' 创建时，
+      // 标题与正文均需非空，否则游客会立刻看到空壳/无标题条目。
+      // 注意：交互式新建走 status:'draft'（默认），不受此处影响。
+      if (body?.status === 'published' && (!title || !content.trim())) {
+        return reply.code(400).send({ error: '发布前需填写标题与正文' })
       }
       const entry = await ctx.knowledge.create({
-        title: body.title,
-        content: body.content,
+        title: title || '未命名草稿',
+        content,
         tags: body.tags,
         category: body.category,
         parentId: body.parentId,
         cover: body.cover,
+        status: body.status,
         visibility: normalizeVisibility(body.visibility) ?? undefined,
         visibleGroups: body.visibleGroups,
       })
@@ -539,12 +580,68 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     }),
   )
 
+  // 批量导入文档（站主）；单次上限 MAX_IMPORT_ENTRIES 条
+  // bodyLimit：批量 md 正文（含代码块/长文）可能远超 Fastify 默认 1MB，放宽到 20MB
+  // body.parentId：统一挂载目标父文档（可选）；条目自带 parentId 时以条目为准（保留逐条覆盖）
+  app.post('/api/knowledge/import', { bodyLimit: 20 * 1024 * 1024 }, (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      const body = req.body as { entries?: KnowledgeEntryInput[]; parentId?: string }
+      if (!Array.isArray(body?.entries) || !body.entries.length) {
+        return reply.code(400).send({ error: 'entries array is required' })
+      }
+      if (body.entries.length > MAX_IMPORT_ENTRIES) {
+        return reply
+          .code(400)
+          .send({ error: `too many entries (max ${MAX_IMPORT_ENTRIES})` })
+      }
+
+      const unifiedParentId =
+        typeof body.parentId === 'string' && body.parentId.trim() ? body.parentId.trim() : undefined
+      // 父文档查证与分类继承都在**写入之前**完成（校验失败 → 400 零写入）。
+      // list() 只返回未软删除条目：父文档不存在 / 已在回收站都会查不到 → parent not found。
+      if (unifiedParentId || body.entries.some((e) => !!e?.parentId)) {
+        const parents = new Map((await ctx.knowledge.list()).map((e) => [e.id, e]))
+        if (unifiedParentId && !parents.has(unifiedParentId)) {
+          return reply.code(400).send({ error: 'parent not found' })
+        }
+        // 统一父级下发到每条（条目自带 parentId 优先）；导入专用分类继承——条目未显式给分类时
+        // 继承父文档分类（不改 buildEntry/create 的通用语义，以免影响"新建文章"路径）。
+        body.entries = body.entries.map((it) => {
+          const pid = it?.parentId || unifiedParentId
+          if (!pid) return it
+          const parent = parents.get(pid)
+          const next: KnowledgeEntryInput = { ...it, parentId: pid }
+          if (parent?.category && !it.category?.trim()) next.category = parent.category
+          return next
+        })
+      }
+
+      return await ctx.knowledge.importMany(body.entries)
+    }),
+  )
+
+  // 更新条目（站主）：
+  //  - `status`（可选）走白名单 draft|published；'archived' 或其它值 → 400（归档无写入入口）
+  //  - `status:'published'` 时校验合并后 title/content 非空（服务层权威校验）→ 400
+  //  - `autosave:true`（自动保存路径）→ 跳过 embedding 向量化（避免每 2s 一次外部调用）
   app.patch('/api/knowledge/entries/:id', (req, reply) =>
     requireAdmin(req, reply, async () => {
       const id = (req.params as { id: string }).id
-      const entry = await ctx.knowledge.update(id, req.body as Partial<KnowledgeEntryInput>)
-      if (!entry) return reply.code(404).send({ error: 'entry not found' })
-      return { entry }
+      const body = req.body as Partial<KnowledgeEntryInput> & { autosave?: boolean }
+      if (body?.status !== undefined && body.status !== 'draft' && body.status !== 'published') {
+        return reply.code(400).send({ error: "status must be 'draft' or 'published'" })
+      }
+      const patch: Partial<KnowledgeEntryInput> = { ...body }
+      delete (patch as { autosave?: boolean }).autosave
+      try {
+        const entry = await ctx.knowledge.update(id, patch, {
+          skipEmbedding: body?.autosave === true,
+        })
+        if (!entry) return reply.code(404).send({ error: 'entry not found' })
+        return { entry }
+      } catch (e: any) {
+        return reply.code(400).send({ error: e?.message ?? 'update failed' })
+      }
     }),
   )
 
@@ -744,16 +841,19 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   )
 
   // ---- agent 插件服务 ----
-  app.get('/api/agent/tools', async () => ({
-    tools: ctx.agent.listTools(),
-  }))
+  // 登录鉴权：工具清单暴露内部能力与参数结构，按登录态收敛（完善④ Q1）
+  app.get('/api/agent/tools', (req, reply) =>
+    requireUser(req, reply, async () => ({
+      tools: ctx.agent.listTools(),
+    })),
+  )
 
   // 执行一个服务端工具（节点本地 agent 循环复用服务端工具时调用；登录鉴权）
   app.post('/api/agent/tools/:name/run', (req, reply) =>
-    requireUser(req, reply, async () => {
+    requireUser(req, reply, async (user) => {
       const name = (req.params as { name: string }).name
       const body = req.body as { args?: Record<string, unknown> }
-      return { result: await ctx.agent.runTool(name, body?.args ?? {}) }
+      return { result: await ctx.agent.runTool(name, body?.args ?? {}, await callOf(user)) }
     }),
   )
 
@@ -795,14 +895,17 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   )
 
   // ---- Agent 节点（桌面端本地 agent 运行时）注册/发现/心跳 ----
-  app.get('/api/agent/nodes', async () => {
-    const now = Date.now()
-    const nodes = (await ctx.agent.listNodes()).map((n) => ({
-      ...n,
-      online: now - new Date(n.lastSeenAt).getTime() < 30000,
-    }))
-    return { nodes }
-  })
+  // 登录鉴权：节点列表含 ownerId/name/lastSeenAt，按登录态收敛（完善④ Q2）
+  app.get('/api/agent/nodes', (req, reply) =>
+    requireUser(req, reply, async () => {
+      const now = Date.now()
+      const nodes = (await ctx.agent.listNodes()).map((n) => ({
+        ...n,
+        online: now - new Date(n.lastSeenAt).getTime() < 30000,
+      }))
+      return { nodes }
+    }),
+  )
   app.post('/api/agent/nodes/register', (req, reply) =>
     requireUser(req, reply, async (user) => {
       const body = req.body as { id?: string; name?: string }
@@ -884,10 +987,12 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
       const task = await ctx.agent.getTask(id)
       if (!task || task.ownerId !== user.id) return reply.code(404).send({ error: 'task not found' })
       if (task.status === 'done' || task.status === 'error') return { task }
+      // 在流开始前解析可见性上下文（避免 SSE 头写出后才发现问题）；viewer 取调用者
+      const call = await callOf(user)
       let answer = ''
       const steps: Array<{ toolName: string; toolArgs: Record<string, unknown>; toolResult: string }> = []
       try {
-        for await (const ev of ctx.agent.runStream(task.message, [])) {
+        for await (const ev of ctx.agent.runStream(task.message, [], call)) {
           if (ev.type === 'delta') answer += ev.content
           else if (ev.type === 'tool') {
             steps.push({ toolName: ev.toolName, toolArgs: ev.toolArgs, toolResult: ev.toolResult })
@@ -944,8 +1049,9 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
       })
       let assistantContent = ''
       const steps: Array<{ toolName: string; toolArgs: Record<string, unknown>; toolResult: string }> = []
+      const call = await callOf(user)
       try {
-        for await (const ev of ctx.agent.runStream(body.message, priorHistory)) {
+        for await (const ev of ctx.agent.runStream(body.message, priorHistory, call)) {
           if (ev.type === 'delta') assistantContent += ev.content
           else if (ev.type === 'tool') {
             steps.push({ toolName: ev.toolName, toolArgs: ev.toolArgs, toolResult: ev.toolResult })
@@ -964,11 +1070,12 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
 
   // Agent 流式输出（SSE）（通用，无会话；登录鉴权，与 /api/llm/chat-stream 一致）
   app.post('/api/agent/chat-stream', (req, reply) =>
-    requireUser(req, reply, async () => {
+    requireUser(req, reply, async (user) => {
       const body = req.body as { message?: string; history?: ChatMessage[] }
       if (!body?.message?.trim()) {
         return reply.code(400).send({ error: 'message is required' })
       }
+      const call = await callOf(user)
       const raw = reply.raw
       raw.writeHead(200, {
         'Content-Type': 'text/event-stream; charset=utf-8',
@@ -977,7 +1084,7 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
         'X-Accel-Buffering': 'no',
       })
       try {
-        for await (const ev of ctx.agent.runStream(body.message, body.history ?? [])) {
+        for await (const ev of ctx.agent.runStream(body.message, body.history ?? [], call)) {
           raw.write(`data: ${JSON.stringify(ev)}\n\n`)
         }
       } catch (e) {

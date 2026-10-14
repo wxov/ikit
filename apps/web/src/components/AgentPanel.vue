@@ -58,7 +58,9 @@ function stop() {
 
 async function loadTools() {
   try {
-    const r = await api<{ tools: Array<{ name: string; description: string }> }>('/api/agent/tools')
+    const r = await api<{ tools: Array<{ name: string; description: string }> }>('/api/agent/tools', {
+      headers: authHeaders(),
+    })
     tools.value = r.tools
   } catch {
     /* ignore */
@@ -69,6 +71,7 @@ async function loadNodes() {
   try {
     const r = await api<{ nodes: Array<{ id: string; type: string; name: string; online: boolean }> }>(
       '/api/agent/nodes',
+      { headers: authHeaders() },
     )
     nodes.value = r.nodes
   } catch {

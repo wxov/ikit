@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { api, type KnowledgeEntry, type KnowledgeComment, type CategoryNode } from '../lib/api'
+import { authHeaders } from '../lib/auth'
 import CategoryTree from './CategoryTree.vue'
 
 const emit = defineEmits<{
@@ -29,7 +30,10 @@ function shortDate(iso: string): string {
 
 async function load() {
   try {
-    const r = await api<{ entries: KnowledgeEntry[] }>('/api/knowledge/entries')
+    // 三处 GET 均带 token：站主侧右栏（热门/标签/分类）应包含自己的草稿（方案 F2）
+    const r = await api<{ entries: KnowledgeEntry[] }>('/api/knowledge/entries', {
+      headers: authHeaders(),
+    })
     const list = (r.entries || []).filter((e) => !e.deletedAt)
     entries.value = list
     hot.value = [...list]
@@ -42,7 +46,9 @@ async function load() {
     /* 静默：widget 失败不影响主界面 */
   }
   try {
-    const r = await api<{ comments: KnowledgeComment[] }>('/api/knowledge/comments?limit=8')
+    const r = await api<{ comments: KnowledgeComment[] }>('/api/knowledge/comments?limit=8', {
+      headers: authHeaders(),
+    })
     recent.value = (r.comments || []).map((c) => ({ comment: c, entry: entries.value.find((e) => e.id === c.entryId) }))
   } catch {
     recent.value = []
@@ -54,7 +60,9 @@ async function load() {
     stats.value = []
   }
   try {
-    const r = await api<{ categories: CategoryNode[] }>('/api/knowledge/categories')
+    const r = await api<{ categories: CategoryNode[] }>('/api/knowledge/categories', {
+      headers: authHeaders(),
+    })
     categories.value = r.categories || []
   } catch {
     categories.value = []

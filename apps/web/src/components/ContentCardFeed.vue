@@ -113,7 +113,8 @@ function firstImageUrl(c: string): string | null {
 
 async function onOpen(e: KnowledgeEntry) {
   try {
-    await api(`/api/knowledge/entries/${e.id}/view`, { method: 'POST' })
+    // 带 token：站主打开草稿时计数也按站主身份（否则草稿对 guest 不可见 → 不计数）
+    await api(`/api/knowledge/entries/${e.id}/view`, { method: 'POST', headers: authHeaders() })
   } catch {
     /* 忽略计数失败 */
   }
@@ -142,7 +143,10 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const r = await api<{ entries: KnowledgeEntry[] }>('/api/knowledge/entries')
+    const r = await api<{ entries: KnowledgeEntry[] }>('/api/knowledge/entries', {
+      // 带 token：站主侧才看得到草稿（方案 F2）
+      headers: authHeaders(),
+    })
     entries.value = (r.entries || []).filter((e) => !e.deletedAt)
   } catch (e: any) {
     error.value = e.message
@@ -247,6 +251,8 @@ function next() {
           </span>
           <div class="card-cover" :style="{ background: coverStyle(e) }">
             <span v-if="e.pinned" class="card-pin">置顶</span>
+            <!-- 草稿角标：仅站主能看到草稿条目（方案 Q10） -->
+            <span v-if="isAdmin && (e.status ?? 'published') !== 'published'" class="card-draft">草稿</span>
           </div>
           <div class="card-body">
             <div class="card-title">{{ e.title }}</div>
@@ -340,6 +346,18 @@ function next() {
   font-size: 12px;
   padding: 3px 10px;
   border-radius: 999px;
+}
+.card-draft {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  z-index: 2;
+  background: var(--warn, #f59e0b);
+  color: #fff;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-weight: 600;
 }
 .card-body { padding: 18px 20px 14px; }
 .card-title { font-size: 17px; font-weight: 700; margin: 0 0 8px; line-height: 1.4; }

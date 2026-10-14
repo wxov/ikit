@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, inject, type Ref } from 'vue'
+import { ref, computed, onMounted, nextTick, inject, type Ref } from 'vue'
 import { api, type KnowledgeEntry } from '../lib/api'
 import { authHeaders, listGroups, type Group } from '../lib/auth'
 import DocTreeItem, { type DocNode } from './DocTreeItem.vue'
@@ -11,7 +11,11 @@ const emit = defineEmits<{
   (e: 'createChild', parentId: string): void
 }>()
 
-const props = defineProps<{ category?: string; tag?: string }>()
+// expandIds：需要自动展开并定位的文档（如批量导入的父文档），仅首次加载时执行一次
+const props = defineProps<{ category?: string; tag?: string; expandIds?: string[] }>()
+
+const treeRef = ref<HTMLElement | null>(null)
+let located = false
 
 const userRole = inject<Ref<string>>('userRole', ref('guest'))
 const isAdmin = computed(() => userRole.value === 'admin')
@@ -53,7 +57,11 @@ const visible = computed(() =>
   ),
 )
 
-const roots = computed(() => sortList(visible.value.filter((e) => !e.parentId)))
+// 根节点 = 无父 **或** 父不可见（草稿/私有父容器的可见子项不再成为孤儿被丢掉，方案 F6）
+const roots = computed(() => {
+  const byId = new Set(visible.value.map((e) => e.id))
+  return sortList(visible.value.filter((e) => !e.parentId || !byId.has(e.parentId)))
+})
 
 function childrenOf(id: string): KnowledgeEntry[] {
   return sortList(visible.value.filter((e) => e.parentId === id))
@@ -71,9 +79,35 @@ function highlight(t: string): string {
   return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
+// 展开目标文档及其全部祖先，并滚动定位到该行（仅首轮加载执行）
+function locateTargets() {
+  if (located) return
+  const ids = props.expandIds ?? []
+  if (!ids.length) return
+  const byId = new Map(entries.value.map((e) => [e.id, e]))
+  let target = ''
+  for (const id of ids) {
+    if (!byId.has(id)) continue
+    if (!target) target = id
+    let cur = byId.get(id)
+    while (cur) {
+      expandedDocs.value = { ...expandedDocs.value, [cur.id]: true }
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined
+    }
+  }
+  if (!target) return
+  located = true
+  void nextTick(() => {
+    treeRef.value?.querySelector(`[data-doc-id="${target}"]`)?.scrollIntoView({ block: 'nearest' })
+  })
+}
+
 async function load() {
   try {
-    const r = await api<{ entries: KnowledgeEntry[] }>('/api/knowledge/entries')
+    const r = await api<{ entries: KnowledgeEntry[] }>('/api/knowledge/entries', {
+      // 带 token：否则站主也按 guest 过滤，看不到自己的草稿节点（方案 F2）
+      headers: authHeaders(),
+    })
     entries.value = (r.entries || []).filter((e) => !e.deletedAt)
     // 默认展开所有父节点
     for (const e of entries.value) {
@@ -81,6 +115,7 @@ async function load() {
         expandedDocs.value = { ...expandedDocs.value, [e.id]: true }
       }
     }
+    locateTargets()
   } catch {
     entries.value = []
   }
@@ -283,7 +318,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="doc-tree">
+  <div ref="treeRef" class="doc-tree">
     <div class="dt-head">
       <span class="dt-title">目录</span>
       <span class="dt-meta">{{ visible.length }} 篇 · {{ Math.round(totalWords / 1000) }}k 字</span>
@@ -331,13 +366,14 @@ onMounted(() => {
         @drag-end="onDragEnd"
         @pick-move-target="onPickMoveTarget"
       >
-        <template #entry-menu="{ id }">
-          <div class="doc-menu-item" @click="onEditEntry(entries.find((e) => e.id === id)!)">✏️ 编辑</div>
-          <div class="doc-menu-item" @click="onTogglePin(entries.find((e) => e.id === id)!)">
-            {{ entries.find((e) => e.id === id)?.pinned ? '📌 取消置顶' : '📌 置顶' }}
+        <!-- 菜单条目：当前展开的条目 id = menuFor（条目菜单仅在其 menuFor 命中时渲染） -->
+        <template #entry-menu>
+          <div class="doc-menu-item" @click="onEditEntry(entries.find((e) => e.id === menuFor)!)">✏️ 编辑</div>
+          <div class="doc-menu-item" @click="onTogglePin(entries.find((e) => e.id === menuFor)!)">
+            {{ entries.find((e) => e.id === menuFor)?.pinned ? '📌 取消置顶' : '📌 置顶' }}
           </div>
-          <div class="doc-menu-item" @click="onPermission(entries.find((e) => e.id === id)!)">🔒 权限设置</div>
-          <div class="doc-menu-item danger" @click="onDelete(entries.find((e) => e.id === id)!)">🗑 删除</div>
+          <div class="doc-menu-item" @click="onPermission(entries.find((e) => e.id === menuFor)!)">🔒 权限设置</div>
+          <div class="doc-menu-item danger" @click="onDelete(entries.find((e) => e.id === menuFor)!)">🗑 删除</div>
         </template>
       </DocTreeItem>
     </div>

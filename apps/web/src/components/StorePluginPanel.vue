@@ -43,12 +43,12 @@ async function loadNotes() {
 }
 async function addNote() {
   if (!noteText.value.trim()) return
-  const r = await api('/api/plugins-data/notes', { method: 'POST', headers: hdrs(), body: JSON.stringify({ text: noteText.value }) })
+  const r = await api<{ notes: { id: string; text: string }[] }>('/api/plugins-data/notes', { method: 'POST', headers: hdrs(), body: JSON.stringify({ text: noteText.value }) })
   notes.value = r.notes
   noteText.value = ''
 }
 async function delNote(id: string) {
-  const r = await api(`/api/plugins-data/notes/${id}`, { method: 'DELETE', headers: hdrs() })
+  const r = await api<{ notes: { id: string; text: string }[] }>(`/api/plugins-data/notes/${id}`, { method: 'DELETE', headers: hdrs() })
   notes.value = r.notes
 }
 
@@ -63,16 +63,16 @@ async function loadEvents() {
 }
 async function addEvent() {
   if (!evTitle.value.trim()) return
-  const r = await api('/api/plugins-data/events', { method: 'POST', headers: hdrs(), body: JSON.stringify({ title: evTitle.value, date: evDate.value, time: evTime.value }) })
+  const r = await api<{ events: { id: string; title: string; date: string; time: string; done: boolean }[] }>('/api/plugins-data/events', { method: 'POST', headers: hdrs(), body: JSON.stringify({ title: evTitle.value, date: evDate.value, time: evTime.value }) })
   events.value = r.events
   evTitle.value = ''
 }
 async function toggleEvent(id: string) {
-  const r = await api(`/api/plugins-data/events/${id}/toggle`, { method: 'POST', headers: hdrs(), body: JSON.stringify({}) })
+  const r = await api<{ events: { id: string; title: string; date: string; time: string; done: boolean }[] }>(`/api/plugins-data/events/${id}/toggle`, { method: 'POST', headers: hdrs(), body: JSON.stringify({}) })
   events.value = r.events
 }
 async function delEvent(id: string) {
-  const r = await api(`/api/plugins-data/events/${id}`, { method: 'DELETE', headers: hdrs() })
+  const r = await api<{ events: { id: string; title: string; date: string; time: string; done: boolean }[] }>(`/api/plugins-data/events/${id}`, { method: 'DELETE', headers: hdrs() })
   events.value = r.events
 }
 
@@ -85,16 +85,16 @@ async function loadTodos() {
 }
 async function addTodo() {
   if (!todoText.value.trim()) return
-  const r = await api('/api/plugins-data/todos', { method: 'POST', headers: hdrs(), body: JSON.stringify({ text: todoText.value }) })
+  const r = await api<{ todos: { id: string; text: string; done: boolean }[] }>('/api/plugins-data/todos', { method: 'POST', headers: hdrs(), body: JSON.stringify({ text: todoText.value }) })
   todos.value = r.todos
   todoText.value = ''
 }
 async function toggleTodo(id: string) {
-  const r = await api(`/api/plugins-data/todos/${id}/toggle`, { method: 'POST', headers: hdrs(), body: JSON.stringify({}) })
+  const r = await api<{ todos: { id: string; text: string; done: boolean }[] }>(`/api/plugins-data/todos/${id}/toggle`, { method: 'POST', headers: hdrs(), body: JSON.stringify({}) })
   todos.value = r.todos
 }
 async function delTodo(id: string) {
-  const r = await api(`/api/plugins-data/todos/${id}`, { method: 'DELETE', headers: hdrs() })
+  const r = await api<{ todos: { id: string; text: string; done: boolean }[] }>(`/api/plugins-data/todos/${id}`, { method: 'DELETE', headers: hdrs() })
   todos.value = r.todos
 }
 
@@ -143,12 +143,12 @@ async function loadMd() {
 }
 async function saveMd() {
   if (!mdText.value.trim()) return
-  const r = await api('/api/plugins-data/md', { method: 'POST', headers: hdrs(), body: JSON.stringify({ text: mdText.value }) })
+  const r = await api<{ drafts: { id: string; text: string }[] }>('/api/plugins-data/md', { method: 'POST', headers: hdrs(), body: JSON.stringify({ text: mdText.value }) })
   drafts.value = r.drafts
   mdText.value = ''
 }
 async function delMd(id: string) {
-  const r = await api(`/api/plugins-data/md/${id}`, { method: 'DELETE', headers: hdrs() })
+  const r = await api<{ drafts: { id: string; text: string }[] }>(`/api/plugins-data/md/${id}`, { method: 'DELETE', headers: hdrs() })
   drafts.value = r.drafts
 }
 async function copyMd(text: string) {

@@ -75,6 +75,10 @@ export class SqliteStore implements KnowledgeStore {
         likes INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
     `)
     // 迁移：为旧库补充缺失的列
     const cols = (this.db.prepare('PRAGMA table_info(entries)').all() as any[]).map(
@@ -116,6 +120,7 @@ export class SqliteStore implements KnowledgeStore {
     }))
     const cats = this.db.prepare('SELECT path FROM categories').all() as any[]
     const cmts = this.db.prepare('SELECT * FROM comments').all() as any[]
+    const metas = this.db.prepare('SELECT key, value FROM meta').all() as any[]
     this.cache = {
       entries,
       categories: cats.map((c) => c.path),
@@ -128,6 +133,7 @@ export class SqliteStore implements KnowledgeStore {
         likes: c.likes ?? undefined,
         createdAt: c.created_at,
       })),
+      meta: Object.fromEntries(metas.map((m) => [m.key as string, m.value as string])),
     }
     return this.cache
   }
@@ -144,6 +150,7 @@ export class SqliteStore implements KnowledgeStore {
       this.db.exec('DELETE FROM entries')
       this.db.exec('DELETE FROM categories')
       this.db.exec('DELETE FROM comments')
+      this.db.exec('DELETE FROM meta')
       const ins = this.db.prepare(`
         INSERT INTO entries (id, title, content, tags, category, parent_id, sort_order, pinned, created_at, updated_at, deleted_at, embedding, cover, views, status, visibility, visible_groups)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -179,6 +186,10 @@ export class SqliteStore implements KnowledgeStore {
       `)
       for (const c of data.comments ?? []) {
         insCmt.run(c.id, c.entryId, c.author, c.content, c.parentId ?? null, c.likes ?? 0, c.createdAt)
+      }
+      const insMeta = this.db.prepare('INSERT INTO meta (key, value) VALUES (?, ?)')
+      for (const [k, v] of Object.entries(data.meta ?? {})) {
+        insMeta.run(k, String(v))
       }
       this.db.exec('COMMIT')
     } catch (e) {

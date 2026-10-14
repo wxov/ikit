@@ -16,6 +16,8 @@ export interface KnowledgeEntry {
   cover?: string
   visibility?: EntryVisibility
   visibleGroups?: string[]
+  /** 软删除标记（回收站）：后端 KnowledgeEntry 已有该字段，前端此前漏声明 */
+  deletedAt?: string
   createdAt: string
   updatedAt: string
 }
@@ -45,6 +47,16 @@ export interface WsMessage {
 
 export type EventItem = WsMessage
 
+/** API 错误：`message` 为响应原文（保持既有行为），另附 HTTP `status` 供重试策略判断 4xx/5xx */
+export class ApiError extends Error {
+  readonly status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const hasBody = options?.body != null
   const res = await fetch(apiUrl(path), {
@@ -57,7 +69,7 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(text || `HTTP ${res.status}`)
+    throw new ApiError(text || `HTTP ${res.status}`, res.status)
   }
   return res.json() as Promise<T>
 }

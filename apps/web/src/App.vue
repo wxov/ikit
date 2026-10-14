@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, provide } from 'vue'
-import { createSocket, api, type EventItem, type WsStatus } from './lib/api'
+import { createSocket, api, type EventItem, type WsMessage, type WsStatus } from './lib/api'
+import { createWsConflictGate, type WsConflictState } from './lib/wsConflict'
 import {
   fetchUpdateManifest,
   hasUpdate as hasUpdateFn,
   type UpdateInfo,
 } from './lib/update'
-import { getToken, setToken, logout, currentUser, type PublicUser } from './lib/auth'
+import { getToken, setToken, logout, currentUser, authHeaders, type PublicUser } from './lib/auth'
 import { startDesktopNode } from './lib/agentNode'
 import type { PluginRecord, PluginRole, VisiblePlugins } from './lib/plugins'
 import SystemPanel from './components/SystemPanel.vue'
@@ -19,13 +20,14 @@ import AuthPanel from './components/AuthPanel.vue'
 import ContentCardFeed from './components/ContentCardFeed.vue'
 import PortalRight from './components/PortalRight.vue'
 import ArticleDetail from './components/ArticleDetail.vue'
-import ArticleEditor from './components/ArticleEditor.vue'
+import ArticleEditView from './components/ArticleEditView.vue'
 import DocTree from './components/DocTree.vue'
 import ArchiveView from './components/ArchiveView.vue'
 import TrashView from './components/TrashView.vue'
 import UserProfile from './components/UserProfile.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import UpdateDialog from './components/UpdateDialog.vue'
+import ImportDocsDialog from './components/ImportDocsDialog.vue'
 
 // role 决定前台功能区可见插件；'manager' 为站主专用插件管理页；'users' 为站主用户管理
 type Tab = string
@@ -92,7 +94,11 @@ function stopDesktopNode() {
 
 async function loadCategories() {
   try {
-    const r = await api<{ categories: import('./lib/api').CategoryNode[] }>('/api/knowledge/categories')
+    const r = await api<{ categories: import('./lib/api').CategoryNode[] }>(
+      '/api/knowledge/categories',
+      // 带 token：否则站主也会按 guest 过滤，看不到草稿/私有文章的分类（方案 F2）
+      { headers: authHeaders() },
+    )
     categories.value = r.categories
   } catch {
     categories.value = []
@@ -162,12 +168,35 @@ function isStorePlugin(t: string): boolean {
 
 // 前台功能入口 = 插件（默认功能已并入知识门户）
 const features = computed<PluginRecord[]>(() => plugins.value)
-// 当前打开的文章（阅读视图）与文章编辑器（仅站主）
+
+/**
+ * 插件排序「实时预览」：仅本地按名字序列稳定重排 `plugins.value`（不发请求）。
+ * 顶部功能 nav（:383-391）与移动端 tabbar（:567-575）顺序由 plugins.value 决定 → 自动跟随。
+ * 不在 names 中的插件保持相对位置并排在其后。
+ */
+function previewPluginOrder(names: string[]) {
+  const rank = new Map(names.map((n, i) => [n, i]))
+  plugins.value = [...plugins.value]
+    .map((p, i) => ({ p, i, r: rank.get(p.name) ?? Number.MAX_SAFE_INTEGER }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .map((x) => x.p)
+}
+// 详情页状态机（完善⑦）：list=卡片流 / read=阅读态 / edit=编辑已有文章 / new=空白草稿
+type DetailMode = 'list' | 'read' | 'edit' | 'new'
 const article = ref<import('./lib/api').KnowledgeEntry | null>(null)
-const editorOpen = ref(false)
-const editingEntry = ref<import('./lib/api').KnowledgeEntry | null>(null)
-const editingParentId = ref<string | ''>('')
+const detailMode = ref<DetailMode>('list')
+/** new 态：目录树「＋ 新建子文档」传来的挂载父档 */
+const draftParentId = ref<string | ''>('')
+/** 编辑态组件实例 key：让「新建草稿 → 首次保存创建」不重挂载（否则丢失正在输入的内容） */
+const editKey = ref(0)
+const editViewRef = ref<InstanceType<typeof ArticleEditView> | null>(null)
 const docTreeKey = ref(0)
+// 批量导入入口（仅站主）
+const importOpen = ref(false)
+// 导入挂载目标父文档：导入完成后用于目录树自动展开并定位
+const importTargetParentId = ref('')
+// 知识库数据版本：导入后自增，用于重挂载卡片流/右栏/目录树以重新拉取
+const dataKey = ref(0)
 // 全局筛选：分类 / 标签（来自右栏，联动中栏卡片流与左栏目录）
 const filterCat = ref('')
 const filterTag = ref('')
@@ -178,62 +207,262 @@ const profileOpen = ref(false)
 const sideLeftOpen = ref(false)
 const sideRightOpen = ref(false)
 
-// 门户首页（知识卡片流）
-function goHome() {
+// 全局轻提示（发布/撤回等反馈；非弹窗）
+const appToast = ref('')
+let appToastTimer: ReturnType<typeof setTimeout> | null = null
+function showAppToast(msg: string) {
+  appToast.value = msg
+  if (appToastTimer) clearTimeout(appToastTimer)
+  appToastTimer = setTimeout(() => (appToast.value = ''), 3000)
+}
+
+/** 编辑态是否活跃 */
+const inEditMode = computed(() => detailMode.value === 'edit' || detailMode.value === 'new')
+
+// ---- 多端联动（AC-24）：他端修改 → 顶部提示条（非弹窗），**绝不覆盖当前输入** ----
+// 判定逻辑（回声抑制两道闸 / 触发条件）见 `lib/wsConflict.ts`（纯逻辑，可无头实测）；
+// 本组件只做接线：提示条 UI + 阅读态「重新载入」（显式拉取最新并替换显示）。
+const wsConflict = ref<WsConflictState | null>(null)
+const wsGate = createWsConflictGate({
+  currentId: () => article.value?.id ?? null,
+  currentUpdatedAt: () => article.value?.updatedAt ?? null,
+  // 第 2 轮口径（R2-2）：提示条**仅站主（admin）**可见；游客 / 登录非站主完全不提示
+  canPrompt: () => user.value?.role === 'admin',
+  onConflict: (s) => (wsConflict.value = s),
+})
+
+/** 提示条文案：他端删除（remove）与普通修改文案不同；编辑/新建态追加「你的修改仍在保存中」 */
+const wsConflictText = computed(() => {
+  const s = wsConflict.value
+  if (!s) return ''
+  if (s.kind === 'remove') {
+    return inEditMode.value
+      ? '该文章已被删除或移入回收站；你的修改仍在保存中'
+      : '该文章已被删除或移入回收站'
+  }
+  return inEditMode.value ? '该文章已在其它端被修改；你的修改仍在保存中' : '该文章已在其它端被修改'
+})
+
+/** 本端即将写入（ArticleEditView 的 `writing` 事件）：刷新回声保护窗 */
+function onLocalWrite() {
+  wsGate.noteLocalWrite()
+}
+
+/** 本端写入成功后的本地同步：回写 article，并按 updatedAt 指纹撤回误报的冲突提示条 */
+function syncLocalEntry(entry: import('./lib/api').KnowledgeEntry) {
+  article.value = entry
+  wsGate.noteLocalSaved(entry)
+}
+
+/** 切换文章 / 离开详情 / 删除后：清提示条 **并重置**「已提示过的版本」记录 */
+function clearWsConflict() {
+  wsGate.clear()
+}
+
+/** 用户收起提示条（「继续编辑」/「×」）：只收条，保留版本记录 → 同一 updatedAt 不会复弹（R2-2） */
+function dismissWsConflict() {
+  wsGate.dismiss()
+}
+
+/**
+ * 他端把当前文章软删除（移入回收站）→ 「返回列表」。
+ * 编辑态先尽力 flush 一次（PATCH 仍会写入该已进回收站的条目，不丢内容），但**不因失败把用户困在编辑态**
+ * （失败时内容仍在 localStorage 快照里）。
+ */
+async function wsBackToList() {
+  if (inEditMode.value) await editViewRef.value?.flush()
   article.value = null
+  detailMode.value = 'list'
+  clearWsConflict()
+  docTreeKey.value++
+  dataKey.value++
+}
+
+/** WS 回调：仅 `knowledge:changed`（`update`/`create`）且命中当前文章时才可能提示 */
+function onKnowledgeChanged(msg: WsMessage) {
+  wsGate.handleMessage(msg)
+}
+
+/** 阅读态「重新载入」：显式拉取最新版本并替换显示（站主带 token 才看得到自己的草稿） */
+async function reloadLatest() {
+  const id = wsConflict.value?.id ?? article.value?.id
+  if (!id) return
+  try {
+    const r = await api<{ entries: import('./lib/api').KnowledgeEntry[] }>('/api/knowledge/entries', {
+      headers: authHeaders(),
+    })
+    const latest = (r.entries ?? []).find((e) => e.id === id)
+    clearWsConflict()
+    if (!latest) {
+      showAppToast('该文章已被撤回或删除')
+      article.value = null
+      detailMode.value = 'list'
+      dataKey.value++
+      return
+    }
+    article.value = latest
+    showAppToast('已载入最新版本')
+  } catch (e: any) {
+    showAppToast(`载入失败：${e?.message ?? e}`)
+  }
+}
+
+/** 离开编辑态 / 跳转前先把内容 flush 到服务端；失败则留在编辑态（不静默丢内容） */
+async function flushCurrent(): Promise<boolean> {
+  if (!inEditMode.value) return true
+  const ok = (await editViewRef.value?.flush()) ?? true
+  if (!ok) showAppToast('保存失败，已留在编辑态')
+  return ok
+}
+
+// 门户首页（知识卡片流）
+async function goHome() {
+  if (!(await flushCurrent())) return
+  article.value = null
+  detailMode.value = 'list'
+  clearWsConflict()
   globalQ.value = ''
   filterCat.value = ''
   filterTag.value = ''
   tab.value = HOME_TAB
 }
-function onFilterCategory(path: string) {
+async function onFilterCategory(path: string) {
+  if (!(await flushCurrent())) return
   filterCat.value = path
   filterTag.value = ''
   article.value = null
+  detailMode.value = 'list'
+  clearWsConflict()
   tab.value = HOME_TAB
 }
-function onFilterTag(tag: string) {
+async function onFilterTag(tag: string) {
+  if (!(await flushCurrent())) return
   filterTag.value = tag
   filterCat.value = ''
   article.value = null
+  detailMode.value = 'list'
+  clearWsConflict()
   tab.value = HOME_TAB
 }
 function onClearFilter() {
   filterCat.value = ''
   filterTag.value = ''
 }
-function onOpenEntry(e: import('./lib/api').KnowledgeEntry) {
+async function onOpenEntry(e: import('./lib/api').KnowledgeEntry) {
+  if (!(await flushCurrent())) return
   article.value = e
+  detailMode.value = 'read'
+  clearWsConflict() // 换了一篇文章 → 旧的多端提示条作废
   localStorage.setItem('ikit-kb-selected', e.id)
   tab.value = HOME_TAB
 }
-function onSelectTag(tag: string) {
+async function onSelectTag(tag: string) {
+  if (!(await flushCurrent())) return
   globalQ.value = tag
   article.value = null
+  detailMode.value = 'list'
+  clearWsConflict()
   tab.value = HOME_TAB
 }
-function openEditor(entry: import('./lib/api').KnowledgeEntry | null, parentId?: string) {
+function backToList() {
+  article.value = null
+  detailMode.value = 'list'
+  clearWsConflict()
+}
+
+/** 进入编辑态（已有文章，就地编辑，无弹窗） */
+async function enterEdit(entry: import('./lib/api').KnowledgeEntry) {
   if (user.value?.role !== 'admin') {
     alert('仅站主可编辑文章')
     return
   }
-  editingEntry.value = entry
-  editingParentId.value = parentId ?? ''
-  editorOpen.value = true
-}
-function onEditEntry(e: import('./lib/api').KnowledgeEntry) {
-  openEditor(e)
-}
-function onCreateChild(parentId: string) {
-  openEditor(null, parentId)
-}
-function onEditorSaved(entry: import('./lib/api').KnowledgeEntry | null) {
-  editorOpen.value = false
-  editingEntry.value = null
-  editingParentId.value = ''
+  if (!(await flushCurrent())) return
   article.value = entry
-  docTreeKey.value++ // 目录树刷新
-  if (!entry) tab.value = HOME_TAB
+  draftParentId.value = ''
+  editKey.value++
+  detailMode.value = 'edit'
+  tab.value = HOME_TAB
+}
+
+/** 进入「新建文章」= 详情页空白草稿编辑态（parentId 来自目录树「＋ 新建子文档」） */
+async function enterNew(parentId?: string) {
+  if (user.value?.role !== 'admin') {
+    alert('仅站主可编辑文章')
+    return
+  }
+  if (!(await flushCurrent())) return
+  article.value = null
+  draftParentId.value = parentId ?? ''
+  editKey.value++
+  detailMode.value = 'new'
+  tab.value = HOME_TAB
+}
+
+/** 首次自动保存创建成功：拿到真实 id，目录树出现新条目 */
+function onDraftCreated(entry: import('./lib/api').KnowledgeEntry) {
+  syncLocalEntry(entry)
+  clearWsConflict()
+  detailMode.value = 'edit'
+  docTreeKey.value++
+}
+/** 后续 PATCH 成功：只同步本地对象（不 dataKey++，避免编辑中列表重排） */
+function onSaved(entry: import('./lib/api').KnowledgeEntry) {
+  syncLocalEntry(entry)
+}
+/** 发布 / 撤回成功：卡片流 / 目录树 / 右栏一致刷新 */
+function onStatusChanged(entry: import('./lib/api').KnowledgeEntry) {
+  syncLocalEntry(entry)
+  dataKey.value++
+  docTreeKey.value++
+  showAppToast(entry.status === 'published' ? '已发布 · 游客现已可见' : '已撤回 · 仅站主可见')
+}
+function onDeleted() {
+  article.value = null
+  detailMode.value = 'list'
+  clearWsConflict()
+  docTreeKey.value++
+  dataKey.value++
+}
+function onExitEdit(to: 'read' | 'list') {
+  if (to === 'read' && article.value) {
+    detailMode.value = 'read'
+    return
+  }
+  article.value = null
+  detailMode.value = 'list'
+  clearWsConflict()
+}
+
+/** 阅读态快捷「发布」（仅站主；草稿徽标处的按钮） */
+async function quickPublish(entry: import('./lib/api').KnowledgeEntry) {
+  try {
+    onLocalWrite()
+    const r = await api<{ entry: import('./lib/api').KnowledgeEntry }>(
+      `/api/knowledge/entries/${entry.id}`,
+      { method: 'PATCH', headers: authHeaders(), body: JSON.stringify({ status: 'published' }) },
+    )
+    syncLocalEntry(r.entry)
+    dataKey.value++
+    docTreeKey.value++
+    showAppToast('已发布 · 游客现已可见')
+  } catch (e: any) {
+    showAppToast(`发布失败：${e?.message ?? e}`)
+  }
+}
+// 批量导入文档（站主）：入口 + 导入完成后刷新列表/分类/目录树/右栏
+function openImport() {
+  if (user.value?.role !== 'admin') {
+    alert('仅站主可导入文档')
+    return
+  }
+  importOpen.value = true
+}
+function onDocsImported(payload?: { count?: number; parentId?: string }) {
+  loadCategories()
+  // 指定了父文档：目录树重挂载后自动展开并定位到该父文档
+  importTargetParentId.value = payload?.parentId ?? ''
+  docTreeKey.value++
+  dataKey.value++
 }
 function submitGlobalSearch() {
   if (!globalQ.value.trim()) return
@@ -301,6 +530,10 @@ provide('canWrite', computed(() => !!user.value))
 provide('userRole', computed(() => user.value?.role ?? 'guest'))
 provide('username', computed(() => user.value?.username ?? ''))
 provide('currentUser', user)
+// 编辑器主题跟随门户（VditorEditor 内 watch 切换编辑器/内容/代码主题）
+provide('theme', theme)
+// 插件管理页（PluginSettings.vue）↔ 顶部 nav / 移动 tabbar 的排序联动契约
+provide('pluginOrderSync', { preview: previewPluginOrder, refresh: refreshPlugins })
 
 let socket: ReturnType<typeof createSocket> | null = null
 
@@ -310,6 +543,8 @@ onMounted(() => {
       if (msg.type === 'connected' || msg.type === 'pong') return
       events.value.unshift(msg)
       if (events.value.length > 100) events.value.length = 100
+      // AC-24 多端联动：他端改动当前文章 → 顶部提示条（编辑态不覆盖输入；阅读态由用户点「重新载入」）
+      if (msg.type === 'knowledge:changed') onKnowledgeChanged(msg)
     },
     (status) => {
       wsStatus.value = status
@@ -339,21 +574,60 @@ function onDocClick(e: MouseEvent) {
   if (!t.closest('.avatar-wrap')) avatarOpen.value = false
 }
 
+/** 焦点是否在输入控件内（用于 `N` / `/` 等裸键快捷键不抢输入） */
+function isTypingTarget(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null
+  if (!el || !el.tagName) return false
+  const tag = el.tagName.toLowerCase()
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable === true
+}
+
 function onKeyShortcut(e: KeyboardEvent) {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+  const mod = e.ctrlKey || e.metaKey
+  if (mod && e.key.toLowerCase() === 'k') {
     e.preventDefault()
     searchInput.value?.focus()
+    return
+  }
+  // Ctrl/Cmd+S：编辑态 → 立即保存（拦截浏览器保存对话框）；非编辑态不拦截
+  if (mod && e.key.toLowerCase() === 's') {
+    if (inEditMode.value) {
+      e.preventDefault()
+      void flushCurrent()
+    }
+    return
   }
   if (e.key === 'Escape') {
     adminOpen.value = false
     avatarOpen.value = false
+    return
+  }
+  if (isTypingTarget(e.target)) return
+  // `/` 聚焦搜索（README 既有描述，本期补齐）
+  if (e.key === '/' && !mod && !e.altKey) {
+    e.preventDefault()
+    searchInput.value?.focus()
+    return
+  }
+  // `N` 新建文章（仅站主；编辑态内不响应，避免误触丢输入）
+  if (
+    e.key.toLowerCase() === 'n' &&
+    !mod &&
+    !e.altKey &&
+    user.value?.role === 'admin' &&
+    !inEditMode.value
+  ) {
+    e.preventDefault()
+    void enterNew('')
   }
 }
 
 onUnmounted(() => {
   socket?.close()
+  wsGate.dispose()
   stopDesktopNode()
   if (updateTimer !== undefined) clearInterval(updateTimer)
+  if (appToastTimer) clearTimeout(appToastTimer)
   document.removeEventListener('visibilitychange', onVisibilityChanged)
   window.removeEventListener('focus', checkUpdate)
   window.removeEventListener('click', onDocClick)
@@ -430,6 +704,29 @@ onUnmounted(() => {
       <button class="ub-dismiss" title="稍后" @click="dismissUpdate">×</button>
     </div>
 
+    <!-- 轻提示（发布 / 撤回 / 保存失败等；非弹窗） -->
+    <div v-if="appToast" class="app-toast">{{ appToast }}</div>
+
+    <!-- 多端冲突提示条（AC-24；非弹窗黄条，**仅站主**）：编辑态只告知、绝不覆盖输入；
+         阅读态由用户显式点「重新载入」替换内容；他端删除（remove）时给出「返回列表」 -->
+    <div v-if="wsConflict" class="app-banner" role="status">
+      <span class="ub-icon">⚠️</span>
+      <span class="ub-text">{{ wsConflictText }}</span>
+      <!-- 他端删除：阅读态「返回列表」；编辑/新建态「返回列表 / 继续编辑」 -->
+      <template v-if="wsConflict.kind === 'remove'">
+        <button class="ub-btn" @click="wsBackToList">返回列表</button>
+        <button v-if="inEditMode" class="ub-dismiss" title="继续编辑" @click="dismissWsConflict">继续编辑</button>
+      </template>
+      <!-- 他端修改：编辑态只提示（无「重新载入」→ 无 WS→编辑器回写路径）；阅读态可显式重新载入 -->
+      <template v-else-if="inEditMode">
+        <button class="ub-btn" @click="dismissWsConflict">继续编辑</button>
+      </template>
+      <template v-else>
+        <button class="ub-btn" @click="reloadLatest">重新载入</button>
+        <button class="ub-dismiss" title="稍后" @click="dismissWsConflict">×</button>
+      </template>
+    </div>
+
     <div class="portal" :class="{ 'side-open-left': sideLeftOpen, 'side-open-right': sideRightOpen }">
       <!-- 左侧导航（桌面） -->
       <aside class="portal-left">
@@ -444,8 +741,11 @@ onUnmounted(() => {
           <button :class="{ active: tab === 'trash' }" @click="tab = 'trash'">
             <span class="pl-ico">🗑</span> 回收站
           </button>
-          <button v-if="user?.role === 'admin'" @click="openEditor(null)">
+          <button v-if="user?.role === 'admin'" @click="enterNew('')">
             <span class="pl-ico">✎</span> 新建文章
+          </button>
+          <button v-if="user?.role === 'admin'" @click="openImport">
+            <span class="pl-ico">📥</span> 导入文档
           </button>
           <div class="pl-group pl-dir-group">
             <span class="pl-group-title">目录</span>
@@ -454,9 +754,10 @@ onUnmounted(() => {
                 :key="docTreeKey"
                 :category="filterCat"
                 :tag="filterTag"
+                :expand-ids="importTargetParentId ? [importTargetParentId] : []"
                 @open="onOpenEntry"
-                @edit="onEditEntry"
-                @create-child="onCreateChild"
+                @edit="enterEdit"
+                @create-child="enterNew"
               />
             </div>
           </div>
@@ -466,14 +767,30 @@ onUnmounted(() => {
       <!-- 主内容区 -->
       <main class="portal-main">
         <ArticleDetail
-          v-if="tab === HOME_TAB && article"
+          v-if="tab === HOME_TAB && article && detailMode === 'read'"
           :entry="article"
-          @back="article = null"
-          @edit="onEditEntry"
+          @back="backToList"
+          @edit="enterEdit"
           @tag="onSelectTag"
+          @publish="quickPublish"
+        />
+        <ArticleEditView
+          v-else-if="tab === HOME_TAB && inEditMode"
+          ref="editViewRef"
+          :key="editKey"
+          :entry="article"
+          :parent-id="draftParentId"
+          :categories="categoryPaths"
+          @created="onDraftCreated"
+          @saved="onSaved"
+          @status="onStatusChanged"
+          @writing="onLocalWrite"
+          @exit="onExitEdit"
+          @deleted="onDeleted"
         />
         <ContentCardFeed
           v-else-if="tab === HOME_TAB"
+          :key="dataKey"
           :query="globalQ"
           :category="filterCat"
           :tag="filterTag"
@@ -495,7 +812,7 @@ onUnmounted(() => {
 
       <!-- 右侧 widget 栏（桌面） -->
       <aside class="portal-right">
-        <PortalRight @open="onOpenEntry" @tag="onFilterTag" @category="onFilterCategory" />
+        <PortalRight :key="dataKey" @open="onOpenEntry" @tag="onFilterTag" @category="onFilterCategory" />
       </aside>
     </div>
 
@@ -528,14 +845,13 @@ onUnmounted(() => {
       <button class="auth-close" title="关闭" @click="showAuth = false">×</button>
     </div>
 
-    <!-- 文章编辑器（全新界面，仅站主） -->
-    <ArticleEditor
-      v-if="editorOpen"
-      :entry="editingEntry"
-      :parent-id="editingParentId"
-      :categories="categoryPaths"
-      @saved="onEditorSaved"
-      @cancel="editorOpen = false"
+    <!-- 文章编辑弹窗已移除：编辑/新建都在详情页内就地完成（完善⑦） -->
+
+    <!-- 批量导入文档（仅站主，文件 / 文件夹） -->
+    <ImportDocsDialog
+      v-if="importOpen"
+      @close="importOpen = false"
+      @imported="onDocsImported"
     />
 
     <!-- 设置（检查更新 / 关于 / 帮助） -->
@@ -658,6 +974,37 @@ onUnmounted(() => {
   text-align: center;
   color: var(--muted);
 }
+/* 全局轻提示（发布/撤回等反馈） */
+.app-toast {
+  position: fixed;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 600;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+  border: 1px solid var(--primary);
+  font-size: 13px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+}
+/* 多端冲突提示条（AC-24）：与 update-banner 同构，黄色 warn 系，非弹窗 */
+.app-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 16px 0;
+  padding: 10px 14px;
+  background: var(--warn-soft, #fef3c7);
+  border: 1px solid var(--warn, #f59e0b);
+  border-radius: 10px;
+  color: var(--warn, #b45309);
+  font-size: 13px;
+}
+.app-banner .ub-text { flex: 1; }
+.app-banner .ub-btn { background: var(--warn, #f59e0b); }
+.app-banner .ub-dismiss { color: var(--warn, #b45309); }
 
 .settings-btn {
   border: 1px solid var(--border);

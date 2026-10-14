@@ -18,7 +18,11 @@ const notice = ref('')
 async function load() {
   if (!props.entryId) return
   try {
-    const r = await api<{ comments: KnowledgeComment[] }>(`/api/knowledge/entries/${props.entryId}/comments`)
+    const r = await api<{ comments: KnowledgeComment[] }>(
+      `/api/knowledge/entries/${props.entryId}/comments`,
+      // 带 token：评论列表按可见性过滤，站主看草稿的评论需要身份（方案 F2）
+      { headers: authHeaders() },
+    )
     comments.value = r.comments
   } catch {
     comments.value = []

@@ -22,7 +22,11 @@ export interface KnowledgeEntry {
   sortOrder?: number
   /** 置顶/收藏标记 */
   pinned?: boolean
-  /** 文档状态：草稿 / 已发布 / 已归档 */
+  /**
+   * 发布态：`draft`（草稿，**仅站主可见**，见 `KB_DRAFT_VISIBILITY`）/ `published`（已发布）/
+   * `archived`（历史值，当前无写入入口，PATCH/POST 显式拒绝）。
+   * **缺省/`undefined`/`NULL` 一律视为 `published`**（存量数据兼容，不因发布态过滤而消失）。
+   */
   status?: 'draft' | 'published' | 'archived'
   /** 访问/浏览量 */
   views?: number
@@ -49,6 +53,12 @@ export interface KnowledgeEntryInput {
   cover?: string
   visibility?: EntryVisibility
   visibleGroups?: string[]
+  /**
+   * 发布态（仅创建/更新路径使用）：缺省时由**调用方**决定默认值——
+   * `create()` = `draft`（交互式新建走草稿流）、`importMany()` = `published`（导入即可见）。
+   * `'archived'` 不在白名单内，由 API 路由拒绝（400）。
+   */
+  status?: 'draft' | 'published'
 }
 
 export interface KnowledgeSearchResult {
@@ -62,6 +72,11 @@ export interface KnowledgeDb {
   categories: string[]
   /** 评论列表（可选，兼容旧库） */
   comments?: KnowledgeComment[]
+  /**
+   * 元信息键值（JSON 直接作为普通键；SQLite 为 `meta(key,value)` 表）。
+   * 当前用于数据迁移标记（如 `draftPublishV1`）；旧库缺省为 `undefined`，使用时初始化。
+   */
+  meta?: Record<string, string>
 }
 
 /** 文章评论 */
@@ -94,8 +109,22 @@ export type VisibilitySyncMode = 'self' | 'same' | 'all'
 
 export interface KnowledgeService {
   create(input: KnowledgeEntryInput): Promise<KnowledgeEntry>
+  /**
+   * 批量导入条目（站主）：与 create 行为一致（分类补全 / sortOrder / 向量化 / knowledge:changed 广播），
+   * 跳过标题为空的条目；返回实际创建数量与条目列表。
+   * **默认发布态为 `published`**（导入即可见）；条目显式传 `status` 时以显式值为准。
+   */
+  importMany(items: KnowledgeEntryInput[]): Promise<{ created: number; entries: KnowledgeEntry[] }>
   list(options?: { limit?: number; offset?: number }, viewer?: Viewer): Promise<KnowledgeEntry[]>
-  update(id: string, patch: Partial<KnowledgeEntryInput>): Promise<KnowledgeEntry | undefined>
+  /**
+   * 更新条目（站主）。`opts.skipEmbedding = true`（自动保存路径）跳过 embedding 向量化，
+   * 避免 2s 一次的外部 API 调用；发布/撤回与手动保存不传，向量化照常。
+   */
+  update(
+    id: string,
+    patch: Partial<KnowledgeEntryInput>,
+    opts?: { skipEmbedding?: boolean },
+  ): Promise<KnowledgeEntry | undefined>
   moveDoc(id: string, parentId: string | undefined | null): Promise<KnowledgeEntry | undefined>
   reorder(parentId: string | undefined | null, orderedIds: string[]): Promise<{ updated: number }>
   remove(id: string): Promise<boolean>

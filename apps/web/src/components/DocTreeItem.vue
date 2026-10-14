@@ -64,6 +64,7 @@ function onRowClick() {
   <div class="doc-tree-node">
     <div
       class="doc-item"
+      :data-doc-id="node.entry.id"
       :class="{
         active: !batchMode && node.entry.id === selectedId,
         'drag-over-top': !batchMode && overId === node.entry.id && overPos === 'top' && dragId !== node.entry.id,
@@ -108,7 +109,8 @@ function onRowClick() {
       <div v-if="menuFor === node.entry.id" class="doc-menu" @click.stop>
         <div class="doc-menu-item" @click="emit('addChild', node.entry.id)">＋ 新建子文档</div>
         <div class="doc-menu-item" @click="emit('pickMoveTarget', node.entry.id)">⇅ 移动到…</div>
-        <slot name="entry-menu" :id="node.entry.id" />
+        <!-- entry-menu 插槽：当前展开菜单的条目 id 由外层 menuFor 持有（避免递归组件自引用推断） -->
+        <slot name="entry-menu" />
       </div>
     </div>
 
@@ -144,11 +146,7 @@ function onRowClick() {
         @drop="(id, pos) => emit('drop', id, pos)"
         @drag-end="() => emit('dragEnd')"
         @pick-move-target="(id) => emit('pickMoveTarget', id)"
-      >
-        <template #entry-menu="slotProps">
-          <slot name="entry-menu" :id="slotProps.id" />
-        </template>
-      </DocTreeItem>
+      />
     </template>
   </div>
 </template>

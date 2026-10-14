@@ -146,9 +146,10 @@ async function runServerTool(name: string, args: Record<string, unknown>): Promi
 }
 
 async function fetchServerTools(): Promise<ToolDef[]> {
+  // 服务端 /api/agent/tools 需登录（完善④ Q1）：必须显式带 token（api() 不自动注入）
   const r = await api<{
     tools: Array<{ name: string; description: string; parameters: Record<string, unknown> }>
-  }>('/api/agent/tools')
+  }>('/api/agent/tools', { headers: authHeaders() })
   return r.tools.map((t) => ({
     type: 'function',
     function: { name: t.name, description: t.description, parameters: t.parameters },

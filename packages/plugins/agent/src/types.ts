@@ -1,10 +1,26 @@
 import type { ChatMessage } from '@ikit/plugin-llm'
+import type { Viewer } from '@ikit/plugin-knowledge'
+
+/**
+ * Agent 调用上下文：由 API 层按「调用者」解析后显式传入（完善④）。
+ * 缺省（未传）时，内置检索工具按 guest（仅 public）处理 —— fail-closed。
+ */
+export interface AgentCallContext {
+  /** 可见性判定上下文（由 API 层 viewerOf(user) 产出）；缺省视为 guest */
+  viewer?: Viewer
+  /** 调用者用户 id（供工具做归属判定/审计） */
+  userId?: string
+}
 
 export interface AgentTool {
   name: string
   description: string
   parameters: Record<string, unknown>
-  handler: (args: Record<string, unknown>) => Promise<string> | string
+  /** 第二参可选：旧的单参签名 `(args) => ...` 仍然合法（call 被忽略） */
+  handler: (
+    args: Record<string, unknown>,
+    call?: AgentCallContext,
+  ) => Promise<string> | string
 }
 
 export interface AgentToolInfo {
@@ -104,8 +120,8 @@ export interface AgentTaskInput {
 export interface AgentService {
   registerTool(tool: AgentTool): () => void
   listTools(): AgentToolInfo[]
-  runTool(name: string, args: Record<string, unknown>): Promise<string>
-  runStream(userMessage: string, history?: ChatMessage[]): AsyncIterable<AgentStreamEvent>
+  runTool(name: string, args: Record<string, unknown>, call?: AgentCallContext): Promise<string>
+  runStream(userMessage: string, history?: ChatMessage[], call?: AgentCallContext): AsyncIterable<AgentStreamEvent>
   /** 会话管理（按 ownerId 隔离；admin 无特殊例外，与其他用户一致） */
   listSessions(ownerId: string): Promise<AgentSession[]>
   createSession(ownerId: string, title?: string): Promise<AgentSession>

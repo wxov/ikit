@@ -4,9 +4,9 @@ import path from 'node:path'
 import { Schema } from 'cordis'
 import type { Context } from 'cordis'
 import type { ChatMessage, LlmService, LlmToolDefinition } from '@ikit/plugin-llm'
-import type { KnowledgeService } from '@ikit/plugin-knowledge'
+import type { KnowledgeService, Viewer } from '@ikit/plugin-knowledge'
 import { JsonAgentStore, type AgentStore } from './store.js'
-import type { AgentMessage, AgentMessageInput, AgentNode, AgentNodeInput, AgentService, AgentSession, AgentStreamEvent, AgentTask, AgentTaskInput, AgentTool } from './types.js'
+import type { AgentCallContext, AgentMessage, AgentMessageInput, AgentNode, AgentNodeInput, AgentService, AgentSession, AgentStreamEvent, AgentTask, AgentTaskInput, AgentTool } from './types.js'
 
 export const name = 'agent'
 // account 为可选依赖：仅用于存量会话迁移时解析 admin 首账号；不注入时按「无 admin」兜底清空
@@ -59,6 +59,11 @@ export function apply(_ctx: Context, config: Config) {
     return () => tools.delete(tool.name)
   }
 
+  // 缺省可见性上下文：fail-closed —— 未传 call 时等价于「游客」，只能读到 public
+  // （若确需全库检索，显式传 { viewer: { groups: [], isAdmin: true } }，显式即可审计）
+  const GUEST_VIEWER: Viewer = { groups: ['guest'], isAdmin: false }
+  const viewerOf = (call?: AgentCallContext): Viewer => call?.viewer ?? GUEST_VIEWER
+
   // 内置工具：知识库检索（RAG）
   registerTool({
     name: 'knowledge_search',
@@ -71,10 +76,11 @@ export function apply(_ctx: Context, config: Config) {
       },
       required: ['query'],
     },
-    handler: async (args) => {
+    handler: async (args, call) => {
       const query = String(args.query ?? '').trim()
       if (!query) return '检索关键词为空'
-      const results = await ctx.knowledge.search(query)
+      // 按调用者可见性过滤（与知识库 HTTP 接口同源：isVisible 单点实现，此处只传 viewer）
+      const results = await ctx.knowledge.search(query, viewerOf(call))
       if (!results.length) return '知识库中没有找到相关内容'
       const top = results.slice(0, config.knowledgeTopK ?? 3)
       return top
@@ -146,10 +152,12 @@ export function apply(_ctx: Context, config: Config) {
         },
         required: ['title', 'content'],
       },
-      handler: async (args) => {
+      handler: async (args, call) => {
         const title = String(args.title ?? '').trim()
         const content = String(args.content ?? '').trim()
         if (!title || !content) return '标题与正文不能为空'
+        // 审计铺路：记录写入发起者（写权限模型本期不变，见方案 Q5）
+        console.log(`[agent] knowledge_add by user ${call?.userId ?? '(unknown)'}`)
         const entry = await ctx.knowledge.create({
           title,
           content,
@@ -160,11 +168,16 @@ export function apply(_ctx: Context, config: Config) {
     })
   }
 
-  async function runTool(name: string, args: Record<string, unknown>): Promise<string> {
+  async function runTool(
+    name: string,
+    args: Record<string, unknown>,
+    call?: AgentCallContext,
+  ): Promise<string> {
     const tool = tools.get(name)
     if (!tool) return `错误：未知工具 ${name}`
     try {
-      return String(await tool.handler(args))
+      // 旧单参 handler（第三方插件）同样可用：多传的 call 会被 JS 忽略
+      return String(await tool.handler(args, call))
     } catch (e) {
       return `工具执行出错：${e instanceof Error ? e.message : String(e)}`
     }
@@ -184,6 +197,7 @@ export function apply(_ctx: Context, config: Config) {
   async function* runStream(
     userMessage: string,
     history: ChatMessage[] = [],
+    call?: AgentCallContext,
   ): AsyncIterable<AgentStreamEvent> {
     const messages: ChatMessage[] = [
       { role: 'system', content: config.systemPrompt ?? '' },
@@ -214,12 +228,13 @@ export function apply(_ctx: Context, config: Config) {
         return
       }
 
-      for (const call of toolCalls) {
-        const toolName = call.function.name
+      // 注意：循环变量不能叫 call，否则会遮蔽本函数的 call（调用上下文）形参
+      for (const toolCall of toolCalls) {
+        const toolName = toolCall.function.name
         const tool = tools.get(toolName)
         let toolArgs: Record<string, unknown> = {}
         try {
-          toolArgs = JSON.parse(call.function.arguments || '{}')
+          toolArgs = JSON.parse(toolCall.function.arguments || '{}')
         } catch {
           toolArgs = {}
         }
@@ -230,7 +245,7 @@ export function apply(_ctx: Context, config: Config) {
           toolResult = `错误：未知工具 ${toolName}`
         } else {
           try {
-            toolResult = String(await tool.handler(toolArgs))
+            toolResult = String(await tool.handler(toolArgs, call))
           } catch (e) {
             toolResult = `工具执行出错：${e instanceof Error ? e.message : String(e)}`
           }
@@ -239,7 +254,7 @@ export function apply(_ctx: Context, config: Config) {
         yield { type: 'tool', toolName, toolArgs, toolResult }
         messages.push({
           role: 'tool',
-          tool_call_id: call.id,
+          tool_call_id: toolCall.id,
           content: toolResult,
         })
       }

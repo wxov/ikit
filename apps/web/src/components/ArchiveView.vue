@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, inject, type Ref } from 'vue'
 import { api, type KnowledgeEntry } from '../lib/api'
+import { authHeaders } from '../lib/auth'
 
 const emit = defineEmits<{ (e: 'open', entry: KnowledgeEntry): void }>()
+
+const userRole = inject<Ref<string>>('userRole', ref('guest'))
+const isAdmin = computed(() => userRole.value === 'admin')
 
 const entries = ref<KnowledgeEntry[]>([])
 const loading = ref(false)
@@ -12,7 +16,10 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const r = await api<{ entries: KnowledgeEntry[] }>('/api/knowledge/entries')
+    const r = await api<{ entries: KnowledgeEntry[] }>('/api/knowledge/entries', {
+      // 带 token：站主侧归档应包含自己的草稿（方案 F2）
+      headers: authHeaders(),
+    })
     entries.value = (r.entries || []).filter((e) => !e.deletedAt)
   } catch (e: any) {
     error.value = e.message
@@ -55,6 +62,8 @@ onMounted(load)
         <ul class="ar-list">
           <li v-for="e in g.list" :key="e.id" class="ar-item" @click="emit('open', e)">
             <span class="ar-title">{{ e.title }}</span>
+            <!-- 草稿标识：仅站主可见这些条目（方案 Q10） -->
+            <span v-if="isAdmin && (e.status ?? 'published') !== 'published'" class="ar-draft">草稿</span>
             <span class="ar-date">{{ e.updatedAt.slice(0, 10) }}</span>
           </li>
         </ul>
@@ -79,5 +88,9 @@ onMounted(load)
 }
 .ar-item:hover { background: var(--primary-soft); }
 .ar-title { flex: 1; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ar-draft {
+  font-size: 11px; padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+  background: var(--warn-soft, #fef3c7); color: var(--warn, #b45309); border: 1px solid var(--warn, #f59e0b);
+}
 .ar-date { font-size: 12px; color: var(--muted); }
 </style>

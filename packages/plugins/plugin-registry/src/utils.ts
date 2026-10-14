@@ -17,6 +17,14 @@ export function isEntryExtensionAllowed(entryPath: string): boolean {
   return ENTRY_EXTENSIONS.has(ext)
 }
 
+/** sha256 十六进制格式（64 位，大小写不敏感） */
+export const SHA256_HEX_RE = /^[0-9a-f]{64}$/
+
+/** 判定是否为合法的 sha256 hex 值（先小写规范化，与 assertSha256 的比较口径一致） */
+export function isSha256Hex(v: unknown): v is string {
+  return typeof v === 'string' && SHA256_HEX_RE.test(v.trim().toLowerCase())
+}
+
 /** 计算单个 buffer 的 sha256（小写 hex） */
 export function sha256Of(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex')

@@ -5,7 +5,10 @@
   "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "sync:vditor": "node ../../scripts/sync-vditor-assets.mjs",
+    "prebuild": "node ../../scripts/sync-vditor-assets.mjs",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
     "build:desktop": "cross-env VITE_API_BASE=https://<your-domain> vite build",
     "build:mobile": "cross-env VITE_API_BASE=http://192.168.1.100:3000 vite build",
     "build:update": "vite build && node ../../scripts/build-web-update.mjs",
@@ -25,6 +28,7 @@
     "katex": "^0.18.4",
     "markdown-it": "^15.0.1",
     "markdown-it-katex": "^2.0.3",
+    "vditor": "4.0.0",
     "vue": "^3.5.42"
   },
   "devDependencies": {
@@ -35,6 +39,7 @@
     "@vitejs/plugin-vue": "^6.0.8",
     "cross-env": "^7.0.3",
     "typescript": "^5.7.0",
-    "vite": "^7.0.0"
+    "vite": "^7.0.0",
+    "vue-tsc": "^3.3.13"
   }
 }

@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# 例外：Vditor 本地离线资源必须入库（完善⑦ Q4 决策；否则 dist/ 会命中 apps/web/public/vditor/dist/**）
+!apps/web/public/vditor/dist/
+!apps/web/public/vditor/dist/**
 data/
 tmp/
 *.log
@@ -34,3 +37,10 @@ update/
 
 # 绗笁鏂规彃浠跺寘锛堣繍琛屾椂鍔犺浇锛?
 /plugins/
+
+# 插件签名私钥目录（完善⑥）：私钥绝不入库；整个 .keys/ 一并忽略（避免「哪个文件能提交」的判断失误）
+.keys/
+
+# 本地会话/工具产物（DSH 技能目录与浏览器验收截图）
+.dsh/
+dsh-browser-shots/

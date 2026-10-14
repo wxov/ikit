@@ -465,6 +465,22 @@ select {
   border-color: var(--border);
 }
 
+/* ==== Vditor 编辑器（完善⑦）==== */
+/* 反向隔离：上面的全局 input/textarea/select 规则会打到 Vditor 工具栏内的隐藏表单控件，
+   这里把 Vditor 内部控件还原为它自己的样式（Vditor 的 dist/index.css 413 个选择器全部带
+   `vditor` 前缀，不会污染门户，无需 Shadow DOM）。 */
+.vditor input,
+.vditor textarea,
+.vditor select {
+  background: revert;
+  color: revert;
+  border-color: revert;
+}
+/* 编辑态内容区（IR 模式 .vditor-reset）暗色下用门户文本色，避免与内容主题叠加出低对比 */
+[data-theme='dark'] .md-editor .vditor-reset {
+  color: var(--text);
+}
+
 [data-theme='dark'] .kb-item:hover,
 [data-theme='dark'] .kb-item.active,
 [data-theme='dark'] .cat-all:hover,
