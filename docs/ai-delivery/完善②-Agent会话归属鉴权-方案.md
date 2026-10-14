@@ -31,7 +31,7 @@
 
 - **`nodeId` 会话绑定**：会话目前始终由服务端 `runStream` 执行（`routes.ts:833-868`）；桌面节点走的是「任务队列」而非「会话」，二者不冲突。绑定 `nodeId` 属后续增强，不在本方案范围。
 - 显式「计划」阶段 / computer-use / 任务实时推流（总览第五节已标未实现）。
-- 知识库可见性透传到 Agent 工具（见 §10 风险 R5，仅记录为已知项，是否立项另议）。
+- 知识库可见性透传到 Agent 工具（见 §10 风险 R5，仅记录为已知项，是否立项另议）。**→ 已于完善④ 修复并关闭（2026-10-13），见 `docs/ai-delivery/acceptance-report-完善④-Agent工具可见性.md`。**
 - 死字段清理、插件生态等其它完善立项项（总览第六节第 1/3 项）。
 
 ---
@@ -281,7 +281,7 @@
 | R2 | 存量会话挂 admin 的隐私归因 | 旧会话本无主、本就全局共享；站主恒有全权限，归因损失最小；备选清空（需备份） |
 | R3 | SSE 先写 200 头再发现越权 | **必须**在 `writeHead` 前完成 `getSession` 校验，否则无法返回 404 |
 | R4 | 前端漏补 token → 401 白屏 | 与后端同步改 `AgentPanel`（§7.1），验收 #8 覆盖 |
-| R5 | `knowledge_search` 工具未按可见性过滤（`agent/index.ts:67` 调 `ctx.knowledge.search(query)` 不传 `viewer`，`knowledge/service.ts:427` 无 viewer 时不过滤）→ 登录用户可经 Agent 检索他人私有/组内知识 | 本方案至少**记录为已知项**；是否「透传 viewer 到 Agent 工具」另立方案。收紧 Agent 到登录后已关闭游客口子，但跨用户口子仍在 |
+| R5 | `knowledge_search` 工具未按可见性过滤（`agent/index.ts:67` 调 `ctx.knowledge.search(query)` 不传 `viewer`，`knowledge/service.ts:427` 无 viewer 时不过滤）→ 登录用户可经 Agent 检索他人私有/组内知识 | 本方案至少**记录为已知项**；是否「透传 viewer 到 Agent 工具」另立方案。收紧 Agent 到登录后已关闭游客口子，但跨用户口子仍在。**→ 已于完善④ 关闭（2026-10-13）：viewer 显式透传 + 缺省 fail-closed（仅 public）+ 4 条执行入口全覆盖，见 `docs/ai-delivery/完善④-Agent工具可见性-方案.md`** |
 | R6 | 迁移并发（JSON 非多进程安全） | 单实例部署无影响；迁移幂等（仅补缺 ownerId） |
 
 **回滚**：`git revert` 本改动即可。数据层 `ownerId` 为加法字段，回滚后旧逻辑忽略该字段恢复全局可见；若当初选「清空」策略，则需用备份的 `agent.json` 恢复。
@@ -297,10 +297,10 @@
 | 3 | 他人会话越权返回码 | **404**（不泄露存在性）；备选 403。验收标准 403/404 均接受 |
 | 4 | 是否同步收紧节点/任务读取端点鉴权（§4.4） | **一并收紧**（对齐一致性）；可拆第二期，但至少 `heartbeat`/`unregister` 随本次 |
 | 5 | 是否补 `nodeId` 会话绑定 | **本期不做**（会话恒跑服务端节点；桌面走任务队列），列为后续 |
-| 6 | `knowledge_search` 可见性透传 | **本期记录为已知项**；是否立项透传 `viewer` 另议 |
+| 6 | `knowledge_search` 可见性透传 | **本期记录为已知项**；是否立项透传 `viewer` 另议。**→ 已于完善④ 关闭（2026-10-13），见 `docs/ai-delivery/完善④-Agent工具可见性-方案.md`** |
 | 7 | 通用 `POST /api/agent/chat-stream`（无会话）是否保留 | **保留 + requireUser**（与 `/api/llm/chat-stream` 一致） |
 | 8 | 前端游客处理：隐藏入口 vs 面板内登录提示 | **保留入口 + 面板内登录提示**（与插件可见性体系一致） |
-| 9 | `GET /api/agent/nodes`、`GET /api/agent/tools` 是否保持公开 | **保持公开**（节点「三端可见」、工具为元数据；可选后续脱敏 `ownerId`） |
+| 9 | `GET /api/agent/nodes`、`GET /api/agent/tools` 是否保持公开 | **保持公开**（节点「三端可见」、工具为元数据；可选后续脱敏 `ownerId`）。**→ 已于完善④ 改为 `requireUser`（2026-10-13，含前端 3 处补 `Authorization`）** |
 
 ---
 

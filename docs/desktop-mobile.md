@@ -71,6 +71,13 @@ pnpm tauri build
 
 `tauri.conf.json` 的 `build.beforeBuildCommand` 已指向 `pnpm build:desktop`（注入 `VITE_API_BASE=http://localhost:3000`）。
 
+> **离线资源（完善⑦，2026-10-13）**：`apps/web/dist` 现包含 **Vditor 编辑器的本地资源** `vditor/dist/**`
+> （≈5.27 MB，含 Lute 引擎 / KaTeX / highlight.js / 内容主题 / emoji），编辑器**不依赖 unpkg CDN**，
+> 断网 / 内网 / 桌面 / 移动端均可正常打开。资源由 `scripts/sync-vditor-assets.mjs` 幂等同步，
+> 并在 `apps/web` 构建前经 `prebuild` 钩子自动执行（升级 `vditor` 版本后也可手动执行
+> `pnpm --filter @ikit/web sync:vditor`）。**桌面/移动端正文与封面里的 `/uploads/...` 相对路径**
+> 在跨域 `VITE_API_BASE` 下仍是既有缺陷（另立项），与本次资源本地化无关。
+
 ## 移动端（Capacitor）
 
 ### 前提条件

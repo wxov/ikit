@@ -37,6 +37,9 @@
 ### 3.2 工具层（参考 DSH）
 
 - 保留 `knowledge_search`；新增 `knowledge_add`（写入知识库，站主/授权）。
+- `knowledge_search` 可见性约束（完善④ 已落地）：**检索范围 = 当前登录用户的可见范围**——admin 恒可见（含 `private`）；登录用户为 `public` + `login` + 自身有效组（含递归子组）命中的 `groups`；游客/未传调用上下文时 fail-closed 仅 `public`；空结果统一文案「知识库中没有找到相关内容」（不区分不存在/无权）。
+- `knowledge_search` 发布态约束（完善⑦ 已落地，2026-10-13）：在可见范围之上**再叠加发布态**——`status` 非 `published` 的**草稿对非 admin 不召回**（`status` 缺省或 NULL 视为已发布）。判定单点同文章读路径（`knowledge.service` 的 `isVisible`）。
+- **Agent 写入即草稿**：`knowledge_add` 走 `create()`，条目默认 `status:'draft'`，**需站主在门户「发布」后才对游客可见**（与「草稿仅站主可见」一致）；`KB_DRAFT_VISIBILITY=everyone` 可回滚该过滤。
 - 新增通用工具（服务端节点）：浏览器控制（抓取/读取网页）、文件读写（受控目录）、命令执行（白名单/受限）、天气、当前时间等。
 - 桌面节点额外工具（已实施）：`exec_command`（白名单命令，无 shell）、`read_local_file` / `write_local_file`（仅限 app-data 下 `agent-workspace` 目录，越界/绝对路径拒绝）。
 - 桌面节点额外工具（暂缓）：操作本地应用（computer-use 风格，最高难度，后置）。

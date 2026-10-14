@@ -45,8 +45,9 @@ i-kit/
 │   └── …（PRD 与各需求文档）
 ├── scripts/
 │   ├── e2e.mjs                # 基础端到端验证（过时，调用已删路由，修复列入完善阶段）
-│   ├── agent-e2e.mjs          # Agent/RAG 验证
-│   ├── import-test.mjs        # 导入验证（过时，调用已删路由）
+│   ├── agent-e2e.mjs          # Agent/RAG 验证（登录态 + chat-stream）
+│   ├── agent-visibility-e2e.mjs # Agent 工具可见性验收（knowledge_search 越权，完善④）
+│   ├── import-test.mjs        # 批量导入验证（登录态调用 /api/knowledge/import，需先准备 tmp-md/；可选 PARENT_ID 指定挂载父档）
 │   ├── category-test.mjs      # 分类验证（过时，调用已删路由）
 │   ├── deploy.ps1             # Windows 本地一键部署
 │   ├── deploy.sh              # Linux/macOS 本地一键部署
@@ -80,12 +81,37 @@ $env:EMBEDDING_API_KEY = "你的 SiliconFlow/OpenAI 兼容 key"
 $env:KB_STORAGE = "sqlite"
 #    首次启动会自动从 JSON 迁移已有数据到 SQLite
 
+# 2d. 草稿可见性（可选；完善⑦，默认 admin-only = 草稿仅站主可见）
+$env:KB_DRAFT_VISIBILITY = "admin-only"   # admin-only | everyone
+#    everyone = 回滚为「草稿全员可见」（历史行为），一句话逃生门
+
+# 2e. 存量草稿迁移（可选；完善⑦，默认 publish）
+$env:KB_MIGRATE_DRAFT_STATUS = "publish"  # publish | off
+#    publish = 启动时把「本功能上线前创建的历史 draft」一次性改判为 published
+#              （幂等：标记写在存储的 meta.draftPublishV1；写前自动备份 <存储文件>.bak-<时间戳>）
+#    off     = 跳过迁移（不写标记、不备份），便于日后手动开启
+
+# 2f. 插件签名（可选；完善⑥，默认 warn = 验签但不拒装）
+$env:PLUGIN_SIGNATURE_MODE = "warn"        # off | warn | enforce
+#    off     = 不验签、不写签名字段（完全等价本功能上线前）
+#    warn    = 验签 + 状态/日志/徽标，不拒装（默认）
+#    enforce = 未签名 / 密钥未受信任 / 验签失败一律拒装（HTTP 400 + PLUGIN_SIGNATURE_*）
+$env:PLUGIN_SIGNING_PUBKEY_FILE = "./.keys/plugin-signing.pub.pem"  # 信任公钥（文件形态）
+#    也可用 PLUGIN_SIGNING_PUBKEY（PEM 单行 / base64 SPKI）或 PLUGIN_SIGNING_KEYS（JSON 多密钥/轮换）
+#    keyId 由公钥派生（ikit- + sha256(SPKI DER)[:16]），无需手工填；私钥放 .keys/（gitignored，绝不入库）
+#    完整流程见 docs/plugin-signing.md
+
 # 3. 启动后端核心服务（http://localhost:3000）
 pnpm dev
 
 # 4. 另开终端启动 Web 前端（http://localhost:5173，自动代理到 3000）
 pnpm dev:web
 ```
+
+> 提示（完善⑦）：编辑器 Vditor 的运行时资源已本地化在 `apps/web/public/vditor/dist/**`（≈5.27 MB，入库），
+> 由 `scripts/sync-vditor-assets.mjs` 幂等同步、并在 `apps/web` 构建前（`prebuild`）自动执行；
+> 升级 `vditor` 版本后执行 `pnpm --filter @ikit/web sync:vditor` 重新同步即可。
+> 前端类型检查：`pnpm --filter @ikit/web typecheck`（`vue-tsc --noEmit`，已串入 web 的 `build`）。
 
 打开 http://localhost:5173 即可看到控制台：系统状态、AI Agent 对话（流式）、知识库管理。
 
@@ -109,6 +135,11 @@ pnpm build:prod
 部署后访问 `http://<服务器IP>`（默认 80 端口，`docker-compose.yml` 映射 `80:3000`）。详细说明（含 HTTPS 反向代理、备份）见 [docs/server-deploy.md](docs/server-deploy.md)。
 
 > LLM 默认指向 DeepSeek（`https://api.deepseek.com`，模型 `deepseek-chat`），任何 OpenAI 兼容接口均可通过 `LLM_API_BASE` / `LLM_MODEL` 切换。
+
+> **⚠️ 发布前必做（完善⑦）**：把 `packages/plugins/knowledge/src/migrate.ts` 的 `DRAFT_PUBLISH_CUTOFF` 校正为**真实上线时刻**。
+> 该常量是存量草稿迁移的截止时间护栏（只把 `createdAt < cutoff` 的历史 `draft` 改判为 `published`）；若仍为默认值
+> `2026-10-20T00:00:00.000Z`（晚于实施日），**窗口期内新建的真实草稿会在下次启动被自动发布**（游客可见）。
+> 改动该常量视为**数据迁移变更，需评审**；发布说明中请记录校正后的实际值与执行时间。
 
 ## 核心设计
 
@@ -136,6 +167,7 @@ export function apply(ctx: Context, config: Config) {
 `packages/plugins/knowledge` 提供 `ctx.knowledge` 服务，功能完整：
 
 - **条目管理**：创建 / 列表（分页 + 可见性过滤）/ 更新
+- **批量导入**：`importMany()`（站主）——一次写入多条（≤500），与 `create()` 同一构造逻辑（分类补全 / sortOrder / 向量化 / `knowledge:changed`），末尾单次落盘；前端支持选文件或整个文件夹导入（子目录 → 分类，顶层目录 → 标签），并可**选择 / 新建挂载父文档**（`POST /api/knowledge/import` 的 body 顶层 `parentId`，条目自带 `parentId` 优先）。挂载语义：子项挂到父档下、同级 `sortOrder` 追加末尾；条目未显式指定可见性时**继承父档可见性**；条目无分类时**继承父档 `category`**（仅导入路径填充）；父档不存在 / 已软删除 → `400 parent not found` 且**零写入**（校验先于写入）
 - **混合检索**：Fuse.js 模糊搜索 + 停用词过滤的关键词子串匹配 +（配置 embedding 时的）向量余弦相似度，三者去重融合排序
 - **文档树**：`parentId`/`sortOrder` 层级 + 拖拽排序/移动（moveDoc / reorder）+ 置顶（`pinned`）
 - **分类**：路径式层级（如 `技术/前端`），从条目派生；添加分类（父级自动补全）+ 批量归类 + 计数
@@ -160,7 +192,8 @@ export function apply(ctx: Context, config: Config) {
 
 - **function-calling 循环**：用户消息 → LLM → 工具调用 → 执行 → 结果回填 → LLM → … 直到产出最终回答
 - **工具注册**：`ctx.agent.registerTool({ name, description, parameters, handler })`
-- **内置工具**：`knowledge_search`（RAG 检索）、`current_time`、`web_fetch`（网页抓取）；可选 `knowledge_add`（写库，需 `enableWriteTools`）
+- **内置工具**：`knowledge_search`（RAG 检索，**检索范围 = 当前登录用户可见范围**：admin 可见全部含 `private`，登录用户为 `public`+`login`+自身有效组命中的 `groups`，游客/缺省仅 `public`）、`current_time`、`web_fetch`（网页抓取）；可选 `knowledge_add`（写库，需 `enableWriteTools`）
+- **工具上下文**：工具 handler 可选第二参 `AgentCallContext { viewer?, userId? }`（由 API 层按调用者解析）：Agent 只负责把调用者身份交给工具，**工具需自行按 `viewer` 鉴权**；内置 `knowledge_search` 恒按调用者可见性过滤（缺省 fail-closed = 仅 `public`）
 - **流式输出**：`runStream()` 逐 token 产出，工具调用与回答交替推送（SSE）
 - **多会话**：会话创建/重命名/删除 + 消息持久化（三端共享；会话按 `ownerId` 账号隔离，会话/消息/chat-stream 均需登录，未登录 401、他人会话 404，见 [docs/需求功能总览.md](docs/需求功能总览.md) 模块⑤）
 - **节点与任务**：桌面节点注册/心跳/在线判定 + 远程任务派发/轮询执行/回传（仅限自己名下节点）
@@ -171,7 +204,7 @@ export function apply(ctx: Context, config: Config) {
 
 - **响应式三栏**：≥1200px 三栏；<1200px 单栏 + 左右侧栏收为抽屉（顶栏 ☰/◫ 开关）；<768px 移动端底部 Tab；≥1600px 宽屏自适应
 - **Markdown 阅读**：markdown-it 渲染 + highlight.js 语法高亮（20+ 语言按需注册）+ 目录 TOC 跳转
-- **编辑体验**：左编辑/右预览分屏、草稿自动保存、快捷键（`/` 搜索、`N` 新建、`Ctrl+S` 保存）
+- **编辑体验**：详情页内**就地可视化编辑**（Vditor IR 即时渲染：标题/正文/分类/标签/封面全字段，**无弹窗**）；「新建文章」与目录树「＋ 新建子文档」进入详情页草稿态，**首次自动保存即创建**；编辑过程**自动保存草稿**（防抖 2s + 最大等待 10s、失焦/切标签页/离开前落盘、失败退避重试、状态可见），手动「发布 / 撤回」双向；**草稿仅站主可见**；快捷键：`Ctrl+K` / `/` 搜索、`N` 新建（站主）、`Ctrl+S` 立即保存（编辑态）
 - **Agent 对话**：流式逐字输出 + Markdown 实时渲染 + 工具调用轨迹 + 停止生成
 - **多端同步**：REST 操作 + WebSocket 订阅变更，三端实时联动
 
@@ -231,15 +264,46 @@ WebSocket 实时同步让三端联动（任一端的变更，其他端自动刷�
 | POST | `/api/plugins/:name/enable` | 启用/禁用（站主） |
 | POST | `/api/plugins/order` | 排序（站主） |
 | POST | `/api/plugins/:name/visibility` | 按组可见性（站主） |
-| GET | `/api/plugin-store` | 商店列表 |
+| GET | `/api/plugin-store` | 商店列表（缺 sha256 的远端条目返回 `installable:false` + `blockedReason`；已装包附带 `scanWarnings`/`scannedAt`）。**签名**：顶层含 `signatureMode`（`off`/`warn`/`enforce`）与 `trustedKeyIds`；条目可选 `signatureStatus`（`unsigned`/`unverified`/`verified`/`invalid`/`unknown-key`，catalog/builtin 恒为 `undefined`）/`signerKeyId`/`signatureVerifiedAt`/`signatureError`/`signedAt`；`enforce` 下不可验签的条目返回 `installable:false` + `blockedReason` |
 | GET | `/api/plugin-store/categories` | 商店分类 |
 | POST | `/api/plugin-store/rate` | 评分/评论 |
-| POST | `/api/plugin-store/install` | 安装（站主；`{name}` 沿用商店条目，或 `{name, packageUrl, sha256}` 直接远端安装） |
-| GET | `/api/plugin-store/:name/export` | 导出第三方插件包 zip（站主） |
-| POST | `/api/plugin-store/import` | 导入插件包 zip base64（站主，`{data, sha256?}`） |
+| POST | `/api/plugin-store/install` | 安装（站主；`{name}` 沿用商店条目，或 `{name, packageUrl, sha256}` 直接远端安装；可选 `signature/keyId/signedHash/signedAt` 覆盖包内签名）。**远端来源必须携带 sha256**（缺失/格式非法下载前拒装、内容不匹配拒装；registry 来源还须 `version` 与包内 `plugin.json` 一致），失败响应含 `code`：`PLUGIN_SHA256_REQUIRED` / `PLUGIN_SHA256_INVALID` / `PLUGIN_SHA256_MISMATCH` / `PLUGIN_STORE_VERSION_MISMATCH` / `PLUGIN_SIGNATURE_REQUIRED` / `PLUGIN_SIGNATURE_MALFORMED` / `PLUGIN_SIGNATURE_KEY_UNKNOWN` / `PLUGIN_SIGNATURE_INVALID`；成功响应含 `scan` 与 `signature`（`{status,keyId,signedAt,verifiedAt?,error?,warning?}`） |
+| GET | `/api/plugin-store/:name/export` | 导出第三方插件包 zip（站主；库中保存的签名会写回 zip archive comment，**不新增 zip 条目**） |
+| POST | `/api/plugin-store/import` | 导入插件包 zip base64（站主，`{data, sha256?, signature?, keyId?, signedHash?, signedAt?}`）。本地导入**保持 sha256 可选**（管理员本机人工动作，缺省只 warn 放行、不做完整性校验）；请求体签名字段优先于 zip comment；响应含 `scan` 与 `signature` |
 | POST | `/api/plugin-store/refresh` | 手动刷新远端市场目录源（站主） |
-| POST | `/api/plugin-store/:name/update` | 更新（站主） |
+| POST | `/api/plugin-store/:name/update` | 更新（站主；远端来源与 install 同一把关点：必须 sha256 + 版本一致 + 签名策略一致），响应含 `scan` 与 `signature` |
 | DELETE | `/api/plugin-store/:name` | 卸载（站主） |
+
+> 排序交互：插件管理页（站主）支持拖拽排序，**拖动中即时预览**（列表与顶部功能 nav / 移动端 tabbar 同步变化），松手后提交、失败回滚；触控端可用条目上的 ⬆/⬇ 按钮排序。
+>
+> 安全扫描说明：`scanWarnings` 为**启发式提示，扫不到 ≠ 安全**，不构成安全保证；主责防线是「远端强制 sha256 + 仅站主可安装 + 二次确认」。
+>
+> 插件签名说明（ed25519）：签名对象是**文件树规范序哈希**（`sha256OfFileTree`），验签在**落盘前**完成；`PLUGIN_SIGNATURE_MODE=warn`（默认）只提示不拒装，`enforce` 才拒装（HTTP 400 + `PLUGIN_SIGNATURE_*`）。完整运维流程见 [`docs/plugin-signing.md`](docs/plugin-signing.md)。
+
+### 插件签名快速上手（ed25519）
+```bash
+# 1) 生成密钥（私钥写入 gitignored 的 .keys/，**绝不入库/入日志**；stdout 只打印 keyId / .env 行 / 信任表片段）
+node scripts/gen-plugin-key.mjs
+
+# 2) 按 .env 行配置公钥（仅公钥，安全；私钥也可以走 CI Secret + --key-env）
+#    PLUGIN_SIGNATURE_MODE=warn
+#    PLUGIN_SIGNING_PUBKEY_FILE=./.keys/plugin-signing.pub.pem
+
+# 3) 签名发包（回写 zip comment 并打印可粘贴进 registry.json 的条目片段；--dir 亦可，--zip 与服务器字节一致更推荐）
+node scripts/sign-plugin.mjs --dir plugins/hello --out tmp/hello-signed.zip --registry-entry --version 1.0.0
+
+# 4) 独立核验（无需私钥，第三方/CI 可复核）+ 与服务器树哈希对拍
+node scripts/sign-plugin.mjs --verify tmp/hello-signed.zip --pub .keys/plugin-signing.pub.pem
+node scripts/sign-plugin.mjs --zip tmp/hello-signed.zip --print-hash
+```
+
+> ⚠️ **发布者必读**：远端签名包的 **`registry.json` 条目必须携带 `signature/keyId/signedHash`**——
+> 把第 3 步 `--registry-entry` 打印的整段字段粘进 `registry.json`（签名只写在 zip archive comment 里，
+> 而**商店列表页只读 `registry.json`、读不到 zip comment**）。条目缺这几个字段时：列表按「**未签名**」
+> 标注，且 `PLUGIN_SIGNATURE_MODE=enforce` 下安装请求在**下载之前**就被拒（HTTP 400
+> `PLUGIN_SIGNATURE_REQUIRED`）。包已签名 + 条目已粘字段，两者缺一不可。`--verify` 退出码：
+> `0`=verified/unsigned/unverified，`1`=invalid，`2`=用法或文件错误（详见
+> [`docs/plugin-signing.md`](docs/plugin-signing.md) §4.4）。
 
 ### 商店数据（plugins-data）
 | 方法 | 路径 | 说明 |
@@ -255,9 +319,10 @@ WebSocket 实时同步让三端联动（任一端的变更，其他端自动刷�
 ### 知识库（knowledge）
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/knowledge/entries?limit=&offset=` | 列表（分页，按可见性） |
-| POST | `/api/knowledge/entries` | 创建（站主） |
-| PATCH | `/api/knowledge/entries/:id` | 更新（站主） |
+| GET | `/api/knowledge/entries?limit=&offset=` | 列表（分页，按可见性；**非 admin 不含草稿**） |
+| POST | `/api/knowledge/entries` | 创建（站主）。`title` 与 `content` **不可同时为空**（空标题回落「未命名草稿」）；body 可选 `status:'draft'\|'published'`（缺省 `draft`）；草稿仅站主可见；**`status:'published'` 时标题与正文均需非空白，否则 400「发布前需填写标题与正文」（与 PATCH 一致）** |
+| POST | `/api/knowledge/import` | 批量导入（站主，`{entries:[{title,content,tags?,category?}],parentId?}`，≤500 条，单次请求 bodyLimit 20MB）。**导入条目默认 `status:'published'`（导入即可见）**。`parentId` 为统一挂载父档（条目自带 `parentId` 优先）；父档不存在/已软删除 → `400 parent not found` 且零写入；有父档时条目空分类继承父档 `category`，可见性继承由 `importMany`/`buildEntry` 负责 |
+| PATCH | `/api/knowledge/entries/:id` | 更新（站主）。body 可选 `status:'draft'\|'published'`（**发布 / 撤回**；`'archived'` 或非法值 → 400；`status:'published'` 时合并后的 title/content 均需非空，否则 400）；body 可选 `autosave:true` → **跳过 embedding 向量化**（自动保存路径）；空 `title` 回落原值 |
 | POST | `/api/knowledge/entries/:id/view` | 浏览计数 +1 |
 | GET | `/api/knowledge/entries/:id/comments` | 评论列表 |
 | POST | `/api/knowledge/entries/:id/comments` | 发评论（登录） |
@@ -281,7 +346,7 @@ WebSocket 实时同步让三端联动（任一端的变更，其他端自动刷�
 ### Agent
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/agent/tools` | 工具列表 |
+| GET | `/api/agent/tools` | 工具列表（登录） |
 | POST | `/api/agent/tools/:name/run` | 执行服务端工具（登录） |
 | GET | `/api/agent/sessions` | 会话列表（登录，仅自己） |
 | POST | `/api/agent/sessions` | 创建会话（登录） |
@@ -290,7 +355,7 @@ WebSocket 实时同步让三端联动（任一端的变更，其他端自动刷�
 | GET | `/api/agent/sessions/:id/messages` | 会话消息（登录/归属） |
 | POST | `/api/agent/sessions/:id/chat-stream` | 会话内流式对话（SSE，登录/归属） |
 | POST | `/api/agent/chat-stream` | 流式对话（SSE，登录） |
-| GET | `/api/agent/nodes` | 节点列表（公开） |
+| GET | `/api/agent/nodes` | 节点列表（登录） |
 | POST | `/api/agent/nodes/register` | 注册节点（登录） |
 | POST | `/api/agent/nodes/:id/heartbeat` | 心跳（登录/归属） |
 | DELETE | `/api/agent/nodes/:id` | 注销节点（登录/归属） |
@@ -317,14 +382,20 @@ WebSocket 实时同步让三端联动（任一端的变更，其他端自动刷�
 
 ```bash
 # 启动 server 后
-# ⚠️ 过时脚本：scripts/e2e.mjs、import-test.mjs、category-test.mjs 仍调用已删除的旧路由
-#   （如 /api/knowledge/import、DELETE /api/knowledge/categories、/api/knowledge/category-rename、/api/knowledge/search 等），
+# ⚠️ 过时脚本：scripts/e2e.mjs、category-test.mjs 仍调用已删除的旧路由
+#   （如 DELETE /api/knowledge/categories、/api/knowledge/category-rename、/api/knowledge/search 等），
 #   脚本修复已列入完善阶段，暂勿运行。
-node scripts/agent-e2e.mjs    # Agent function-calling + RAG
+node scripts/agent-e2e.mjs              # Agent function-calling + RAG（需 LLM_API_KEY；默认用 admin/admin123 登录）
+node scripts/agent-visibility-e2e.mjs   # Agent 工具可见性验收：knowledge_search 越权（完善④）
+node scripts/import-test.mjs            # 批量导入验证：登录 → 扫描 tmp-md/ → POST /api/knowledge/import（可选 PARENT_ID=<父文档id> 挂到父档，缺省 = 顶层）
+#   可用 BASE / ADMIN_USERNAME / ADMIN_PASSWORD 覆盖默认值；会自动创建并清理临时账号、用户组与文章；
+#   涉及 LLM 的链路（会话/通用 chat-stream、tasks/:id/run）未配置 LLM_API_KEY 时记为 SKIP。
 
-# Agent 流式对话测试（需先配置 LLM_API_KEY）
+# Agent 流式对话测试（需先配置 LLM_API_KEY，且需登录态：POST /api/agent/chat-stream 要求 Authorization）
+TOKEN=$(curl -s -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" -d '{"username":"admin","password":"admin123"}' | jq -r .token)
 curl -N -X POST http://localhost:3000/api/agent/chat-stream \
-  -H "Content-Type: application/json" \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
   -d '{"message":"现在几点了？"}'
 ```
 

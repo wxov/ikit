@@ -181,3 +181,36 @@
   1. 总览 `:134` 的「见第四节」为宽松交叉引用——第四节表内（`:329-334`）为 6 条死字段，无「批量导入」独立行；该路由删除明细在门户文档 §16（`门户布局与功能改造需求文档.md:302`）与第四节前言（`:325`）体现。如需更精确，可改「见门户文档 §16」。
   2. 总览 `:45` README 定位表仍标「待修正（目录结构与 API 表过时…）」、`:297` 模块⑦ 仍标 desktop-mobile JDK「待核实（默认修正项由另一子代理处理）」——这两处标注在本轮修正（README 已重写、JDK 已改 JDK 17+）落地后已过时，属文档同步残留（非事实错误），建议后续一并回写。
 - **验收结论：通过**。构建 PASS（第 1 轮已跑，exit 0）；只读冒烟因 3000 端口无在跑服务未执行（待本地实例存活补跑）；代码走查全模块通过；文档修正全部落地且复验通过、FAIL 清零。遗留仅为「接口冒烟未执行」与上述 2 处可选微调。
+
+---
+
+## 附录：接口冒烟补跑（本地 :3000 · 2026-09-04）
+
+> 闭环第 2 轮遗留的「接口冒烟未执行」：本地以 `pnpm dev` 启动（SQLite 开发库、8 内置插件 + `hello` 第三方包已加载），执行只读 GET 与鉴权边界探测（无写操作；管理员登录仅产生常规会话记录）。
+
+| # | 项目 | 结果 |
+|---|---|---|
+| 1 | `GET /api/health` | 200 `{"ok":true,...}` |
+| 2 | `GET /api/system/info` | 200（309B） |
+| 3 | `GET /api/knowledge/entries?limit=3` | 200（1301B） |
+| 4 | `GET /api/knowledge/categories` | 200（255B） |
+| 5 | `GET /api/plugins/visible` | 200（511B） |
+| 6 | `GET /api/plugin-store` | 200（9946B） |
+| 7 | `GET /api/agent/tools` | 200（718B） |
+| 8 | `GET /api/agent/nodes` | 200（12B，`{"nodes":[]}`） |
+| 9 | `GET /api/update/manifest?client=0.2.6` | 200（dev 环境 hasUpdate=true / hard 字段按本地 env 为空） |
+| 10 | `GET /api/agent/sessions`（匿名） | **401**（完善② 鉴权生效） |
+| 11 | `GET /api/auth/users`（匿名） | **403**（requireAdmin） |
+| 12 | `GET /api/groups`（匿名） | **403** |
+| 13 | `POST /api/plugin-store/import`（匿名，无 Content-Type） | 415（Fastify 解析先于鉴权，非缺陷）；补 `Content-Type: application/json` 后 → **403** |
+| 14 | `POST /api/plugin-store/refresh`（匿名） | **403** |
+| 15 | 登录 `admin`（默认初始账号） | 200，取得 token |
+| 16 | `GET /api/auth/me`（token） | 200（144B） |
+| 17 | `GET /api/auth/users`（token） | 200（301B） |
+| 18 | `GET /api/groups`（token） | 200（272B） |
+| 19 | `GET /api/agent/sessions`（token） | 200（207B，会话按 owner 过滤） |
+| 20 | `GET /api/plugin-store/hello/export`（token） | 200 `application/zip`（931B，P1 导出） |
+
+**结论**：20 项全部符合预期，无 FAIL；鉴权边界（401/403）与公开端点（tools/nodes 匿名 200）符合完善②决策 9。第 2 轮「次要观察 2」的两处过时标注亦已于同期回写（总览 `:45` →「有效（2026-09 已重写目录结构与 API 表）」、`:297` →「D（已修正 2026-09）」）。
+
+*（本附录由协调者在本地实例存活时补跑生成；未新增/修改任何代码文件。）*

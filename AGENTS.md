@@ -140,9 +140,18 @@ export default { name, inject, apply, Config }
 
 知识库条目（`KnowledgeEntry`）：
 - `id` / `title` / `content` / `tags[]` / `category?` / `parentId?` / `pinned?` / `deletedAt?` / `embedding?`
+- 发布态 `status?`：`draft`（**草稿，仅站主可见**）/ `published`（已发布）/ `archived`（历史值，无写入入口且 PATCH 显式拒绝）；**缺省 / `undefined` / `NULL` 一律视为 `published`**（存量数据兼容）
 - 可见性：`visibility?`（`public` / `login` / `groups` / `private`，缺省 = `public`）+ `visibleGroups?`（`groups` 时生效）
 - 分类用路径字符串（`技术/前端`），`/` 分隔层级
 - 软删除用 `deletedAt`，回收站可恢复
+- 条文存储 `KnowledgeDb.meta?: Record<string,string>`（JSON 普通键 / SQLite `meta` 表）；当前用于存量迁移幂等标记 `draftPublishV1`
+
+草稿与发布（完善⑦）：
+- 判定顺序：非 admin **先过发布态**（仅 `published` 可见），再按 `visibility` 判受众；`admin` 恒可见。单点在 `knowledge` 的 `isVisible`，覆盖列表/搜索/分类计数/评论/详情/浏览计数/Agent `knowledge_search`
+- 开关 `KB_DRAFT_VISIBILITY=admin-only | everyone`（默认 `admin-only`；`everyone` 即回滚为「草稿全员可见」）
+- 写入默认态：交互式新建 `create()` = `draft`；批量导入 `importMany()` = `published`（导入即可见）；Agent 写入走 `create()` → 默认草稿，需站主发布后游客可见
+- 存量迁移：启动幂等迁移（`packages/plugins/knowledge/src/migrate.ts`），把上线前创建的历史 `draft` 改判为 `published`；写前自动备份 `<存储文件>.bak-<yyyyMMddTHHmmss>`；`KB_MIGRATE_DRAFT_STATUS=publish | off`（默认 `publish`）；截止时间常量 `DRAFT_PUBLISH_CUTOFF` 变更视为数据迁移变更，需评审
+- 回滚三步：停服 → 还原备份文件 → `KB_DRAFT_VISIBILITY=everyone` 启动
 
 权限体系（用户组 + 内容可见性）：
 - 用户组 `Group`：内置 `guest` / `user` / `admin`（默认存在、不可删）+ 自定义组
@@ -156,3 +165,4 @@ AI Agent（节点/任务/本地工具）：
 - 任务 `AgentTask`：移动/Web 派发给指定节点，节点轮询执行并回传；仅能向自己名下节点派发（`ownerId` 校验）
 - 桌面本地工具（Tauri 原生命令）：`exec_command`（白名单命令、无 shell）、`read_local_file` / `write_local_file`（仅限 app-data 下 `agent-workspace` 目录，越界拒绝）
 - 节点本地循环：`POST /api/llm/chat-stream`（登录鉴权，原始 LLM 流式）+ `POST /api/agent/tools/:name/run`（登录鉴权，执行服务端工具）
+- 工具调用上下文（完善④）：服务端工具 handler 可选第二参 `AgentCallContext { viewer?, userId? }`（`ctx.agent.registerTool` 的旧单参 handler 仍兼容）；**Agent 只负责把调用者身份交给工具，工具需自行按 `viewer` 鉴权**（`POST /api/agent/tools/:name/run` 允许任何登录用户按名字执行任意已注册工具）；`viewer` 由 API 层 `viewerOf(user)` 产出并沿 4 条执行入口（会话 chat-stream、通用 chat-stream、`tasks/:id/run`、`tools/:name/run`）透传；内置 `knowledge_search` 恒按调用者可见性过滤，**缺省（未传 call）fail-closed 按 guest 处理 = 仅 `public`**
