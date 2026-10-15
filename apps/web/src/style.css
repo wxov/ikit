@@ -378,6 +378,38 @@ main.wide {
   text-decoration: underline;
 }
 
+/* ---- 文章互链（内部文档链接）：`[[标题]]` / `[文字](ikit://doc/<id>)` ----
+   由 `lib/markdown.ts` 渲染为 `a.ikit-doc-link`（带 data-doc-id / data-doc-title），
+   阅读端（ArticleDetail.vue）按「当前用户可见索引」标注失效态（`.ikit-doc-link--missing`）。 */
+.markdown-body a.ikit-doc-link {
+  color: var(--primary-dark);
+  border-bottom: 1px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  cursor: pointer;
+}
+
+.markdown-body a.ikit-doc-link:hover {
+  text-decoration: none;
+  border-bottom-color: var(--primary);
+}
+
+/* 解析不到（不存在 / 不可见 / 草稿对非站主不可见）：虚线 + 弱化色 + tooltip「文档不存在或无权访问」 */
+.markdown-body a.ikit-doc-link--missing {
+  color: var(--muted);
+  border-bottom: 1px dashed var(--muted);
+  cursor: help;
+}
+
+.markdown-body a.ikit-doc-link--missing:hover {
+  border-bottom-style: dashed;
+}
+
+/* Vditor `[[` 标题补全候选里的「分类/父路径」小字（hint 由 Vditor 注入 DOM，故用全局样式） */
+.vditor-hint .ikit-hint-path {
+  color: var(--muted);
+  font-size: 11px;
+  margin-right: 6px;
+}
+
 .markdown-body ul,
 .markdown-body ol {
   padding-left: 1.6em;
@@ -476,9 +508,190 @@ select {
   color: revert;
   border-color: revert;
 }
-/* 编辑态内容区（IR 模式 .vditor-reset）暗色下用门户文本色，避免与内容主题叠加出低对比 */
+/* 编辑态内容区（wysiwyg 模式 .vditor-reset）暗色下用门户文本色，避免与内容主题叠加出低对比 */
 [data-theme='dark'] .md-editor .vditor-reset {
   color: var(--text);
+}
+
+/* ===========================================================================
+   飞书式编辑区排版（作用域严格限定在 `.md-editor .vditor-reset` 内，不污染门户其它区域）
+   —— 目标：行距 / 标题层级字号 / 段间距 / 引用 / 代码块 / 表格向飞书文档靠拢。
+   阅读端仍用 markdown-it（见 `.markdown-body`），允许与编辑区存在轻微差异。
+   =========================================================================== */
+.md-editor .vditor-reset {
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--text);
+}
+/* 编辑区宽度：飞书式为居中窄栏，超宽屏下行宽更舒适 */
+.md-editor .vditor-wysiwyg .vditor-reset {
+  max-width: 860px;
+  padding: 22px 28px 60px;
+}
+.md-editor .vditor-reset p {
+  margin: 0 0 0.55em;
+}
+.md-editor .vditor-reset h1,
+.md-editor .vditor-reset h2,
+.md-editor .vditor-reset h3,
+.md-editor .vditor-reset h4,
+.md-editor .vditor-reset h5,
+.md-editor .vditor-reset h6 {
+  margin: 1.1em 0 0.45em;
+  line-height: 1.35;
+  font-weight: 600;
+  border-bottom: none; /* 去掉 Vditor 内容主题给 h1/h2 的下划线，更接近飞书 */
+  padding-bottom: 0;
+}
+.md-editor .vditor-reset h1 { font-size: 1.75em; }
+.md-editor .vditor-reset h2 { font-size: 1.42em; }
+.md-editor .vditor-reset h3 { font-size: 1.2em; }
+.md-editor .vditor-reset h4 { font-size: 1.05em; }
+.md-editor .vditor-reset h5,
+.md-editor .vditor-reset h6 { font-size: 1em; color: var(--muted); }
+.md-editor .vditor-reset ul,
+.md-editor .vditor-reset ol {
+  padding-left: 1.5em;
+  margin: 0 0 0.55em;
+}
+.md-editor .vditor-reset li {
+  margin: 0.18em 0;
+}
+.md-editor .vditor-reset li > p {
+  margin: 0;
+}
+/* 引用：飞书式左侧竖条 + 浅底 */
+.md-editor .vditor-reset blockquote {
+  margin: 0.6em 0;
+  padding: 0.5em 0.9em;
+  border-left: 3px solid var(--primary);
+  border-radius: 0 6px 6px 0;
+  background: var(--primary-soft);
+  color: var(--text);
+}
+.md-editor .vditor-reset blockquote p:last-child {
+  margin-bottom: 0;
+}
+/* 提示块 callout：按类型着色（Lute 输出 `blockquote.callout[data-subtype]`） */
+.md-editor .vditor-reset blockquote.callout {
+  border-left-width: 3px;
+  background: var(--callout-bg, rgba(9, 105, 218, 0.08));
+  border-left-color: var(--callout-fg, #0969da);
+}
+.md-editor .vditor-reset blockquote.callout[data-subtype='NOTE'] { --callout-fg: #0969da; --callout-bg: rgba(9, 105, 218, 0.08); }
+.md-editor .vditor-reset blockquote.callout[data-subtype='TIP'] { --callout-fg: #1a7f37; --callout-bg: rgba(26, 127, 55, 0.08); }
+.md-editor .vditor-reset blockquote.callout[data-subtype='IMPORTANT'] { --callout-fg: #8250df; --callout-bg: rgba(130, 80, 223, 0.08); }
+.md-editor .vditor-reset blockquote.callout[data-subtype='WARNING'] { --callout-fg: #9a6700; --callout-bg: rgba(154, 103, 0, 0.1); }
+.md-editor .vditor-reset blockquote.callout[data-subtype='CAUTION'] { --callout-fg: #cf222e; --callout-bg: rgba(207, 34, 46, 0.08); }
+/* callout 的类型标记 `[!NOTE]` 在编辑区内淡显（阅读端不显示，见 markdown.ts 的说明） */
+.md-editor .vditor-reset .vditor-wysiwyg__callout-marker {
+  color: var(--muted);
+  font-size: 0.9em;
+}
+/* 行内代码 / 代码块 */
+.md-editor .vditor-reset code:not(.hljs) {
+  padding: 0.12em 0.36em;
+  border-radius: 4px;
+  background: rgba(27, 31, 35, 0.06);
+  font-size: 0.9em;
+}
+.md-editor .vditor-reset .vditor-wysiwyg__block[data-type='code-block'] pre,
+.md-editor .vditor-reset .vditor-wysiwyg__preview {
+  border-radius: 8px;
+}
+/* 表格：飞书式浅表头 + 细边框 + 行悬停 */
+.md-editor .vditor-reset table {
+  margin: 0.7em 0;
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+}
+.md-editor .vditor-reset table th,
+.md-editor .vditor-reset table td {
+  border: 1px solid var(--border);
+  padding: 7px 10px;
+  font-size: 0.95em;
+  line-height: 1.6;
+  vertical-align: top;
+}
+.md-editor .vditor-reset table th {
+  background: var(--bg);
+  font-weight: 600;
+}
+.md-editor .vditor-reset table tbody tr:hover {
+  background: var(--primary-soft);
+}
+.md-editor .vditor-reset img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+.md-editor .vditor-reset hr {
+  margin: 1.4em 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+/* 待办列表：复选框与文字对齐 */
+.md-editor .vditor-reset li.vditor-task {
+  list-style: none;
+  margin-left: -1.35em;
+}
+.md-editor .vditor-reset li.vditor-task input[type='checkbox'] {
+  margin-right: 0.45em;
+  vertical-align: middle;
+}
+/* 字数统计：Vditor 默认 `float: right` 会叠在正文上，改为工具栏内右浮动、更克制 */
+.md-editor .vditor-counter {
+  float: none;
+  margin: 0 4px 0 auto;
+}
+.md-editor .vditor-toolbar {
+  align-items: center;
+}
+/* 工具条上的自定义「插入文档链接」按钮与其它图标对齐 */
+.md-editor .ikit-toolbar-doc svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+
+/* ---- 暗色：把上面所有硬编码的浅色值换成主题变量 ---- */
+[data-theme='dark'] .md-editor .vditor-reset code:not(.hljs) {
+  background: rgba(255, 255, 255, 0.09);
+}
+[data-theme='dark'] .md-editor .vditor-reset table th {
+  background: rgba(255, 255, 255, 0.04);
+}
+[data-theme='dark'] .md-editor .vditor-reset table tbody tr {
+  background: transparent;
+}
+[data-theme='dark'] .md-editor .vditor-reset blockquote.callout {
+  background: var(--callout-bg);
+}
+[data-theme='dark'] .md-editor .vditor-reset blockquote.callout[data-subtype='NOTE'] { --callout-fg: #6cb6ff; --callout-bg: rgba(108, 182, 255, 0.12); }
+[data-theme='dark'] .md-editor .vditor-reset blockquote.callout[data-subtype='TIP'] { --callout-fg: #56d364; --callout-bg: rgba(86, 211, 100, 0.12); }
+[data-theme='dark'] .md-editor .vditor-reset blockquote.callout[data-subtype='IMPORTANT'] { --callout-fg: #d2a8ff; --callout-bg: rgba(210, 168, 255, 0.12); }
+[data-theme='dark'] .md-editor .vditor-reset blockquote.callout[data-subtype='WARNING'] { --callout-fg: #e3b341; --callout-bg: rgba(227, 179, 65, 0.12); }
+[data-theme='dark'] .md-editor .vditor-reset blockquote.callout[data-subtype='CAUTION'] { --callout-fg: #ff7b72; --callout-bg: rgba(255, 123, 114, 0.12); }
+[data-theme='dark'] .md-editor .vditor-reset blockquote {
+  border-left-color: var(--primary);
+  background: var(--primary-soft);
+}
+[data-theme='dark'] .md-editor .vditor-reset table th,
+[data-theme='dark'] .md-editor .vditor-reset table td {
+  border-color: var(--border);
+}
+[data-theme='dark'] .md-editor .vditor-reset table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+@media (max-width: 768px) {
+  .md-editor .vditor-wysiwyg .vditor-reset {
+    padding: 16px 14px 48px;
+  }
+  .md-editor .vditor-reset {
+    font-size: 15px;
+    line-height: 1.72;
+  }
 }
 
 [data-theme='dark'] .kb-item:hover,

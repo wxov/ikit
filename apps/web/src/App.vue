@@ -9,6 +9,12 @@ import {
 } from './lib/update'
 import { getToken, setToken, logout, currentUser, authHeaders, type PublicUser } from './lib/auth'
 import { startDesktopNode } from './lib/agentNode'
+import {
+  docIndex,
+  refreshDocIndex,
+  resetDocIndex,
+  scheduleDocIndexRefresh,
+} from './lib/docIndex'
 import type { PluginRecord, PluginRole, VisiblePlugins } from './lib/plugins'
 import SystemPanel from './components/SystemPanel.vue'
 import AgentPanel from './components/AgentPanel.vue'
@@ -136,6 +142,7 @@ function onAuthed(u: { role: string }) {
   showAuth.value = false
   ensureNode()
   refreshPlugins()
+  void refreshDocIndex() // 身份变化 → 可见文章索引（互链解析的数据源）必须重拉
 }
 
 function onProfileUpdated(u: import('./lib/auth').PublicUser) {
@@ -143,6 +150,7 @@ function onProfileUpdated(u: import('./lib/auth').PublicUser) {
   role.value = (u.role as PluginRole) || 'guest'
   ensureNode()
   refreshPlugins()
+  void refreshDocIndex()
 }
 
 async function doLogout() {
@@ -158,6 +166,8 @@ async function doLogout() {
   stopDesktopNode()
   if (tab.value === 'manager' || tab.value === 'users') tab.value = 'system'
   refreshPlugins()
+  resetDocIndex() // 退出登录：清空索引缓存（下次以 guest 身份重新拉取）
+  clearDocStack()
 }
 
 // 是否为商店/第三方可加载插件面板
@@ -182,14 +192,35 @@ function previewPluginOrder(names: string[]) {
     .map((x) => x.p)
 }
 // 详情页状态机（完善⑦）：list=卡片流 / read=阅读态 / edit=编辑已有文章 / new=空白草稿
-type DetailMode = 'list' | 'read' | 'edit' | 'new'
+// 详情页状态（完善⑦ → 完善⑧ 无模式化）：list=卡片流 / read=已打开一篇文章 / new=空文档草稿
+// 注：**没有 `edit` 这一「编辑页」态**——站主打开文章即就地可编辑（见 `ownerDocOpen`）。
+type DetailMode = 'list' | 'read' | 'new'
 const article = ref<import('./lib/api').KnowledgeEntry | null>(null)
 const detailMode = ref<DetailMode>('list')
+/**
+ * 文章互链**返回栈**：由「从正文内部链接同页跳转」压栈（存文章 id，后进先出）。
+ * - 点击详情页「返回」时优先弹栈回到上一篇（按钮文案 `← 返回上一篇`）；栈空则回列表（`← 返回列表`）。
+ * - 从列表 / 目录树 / 卡片流 / 归档 / 回收站等**外部入口**进入文章、或回到列表时清空（新的一段阅读轨迹）。
+ *   栈深上限 50，避免无限增长。
+ */
+const docStack = ref<string[]>([])
+const DOC_STACK_MAX = 50
+/** 详情页返回按钮文案（依返回栈是否为空） */
+const detailBackLabel = computed(() => (docStack.value.length ? '← 返回上一篇' : '← 返回列表'))
+/** 清空返回栈（任何「从外部入口进入文章 / 回到列表」的路径都要调） */
+function clearDocStack() {
+  if (docStack.value.length) docStack.value = []
+}
 /** new 态：目录树「＋ 新建子文档」传来的挂载父档 */
 const draftParentId = ref<string | ''>('')
-/** 编辑态组件实例 key：让「新建草稿 → 首次保存创建」不重挂载（否则丢失正在输入的内容） */
+/** 编辑态组件实例 key：让「新建草稿 → 首次保存创建」不重挂载（否则丢失正在输入的内容）；
+ *  另在「打开 / 切换文章」时自增 → 每个文章一个全新的常驻编辑器实例（内容不会被上一篇污染） */
 const editKey = ref(0)
 const editViewRef = ref<InstanceType<typeof ArticleEditView> | null>(null)
+/** 打开文章时是否自动进入编辑外壳（新建草稿 / 目录树「编辑」入口为 true；从列表点开为 false → 不打扰阅读） */
+const autoFocusDoc = ref(false)
+/** 站主详情容器的编辑外壳是否展开（由容器 `shell` 事件同步；用于多端冲突提示条口径 + `N` 快捷键） */
+const docShellActive = ref(false)
 const docTreeKey = ref(0)
 // 批量导入入口（仅站主）
 const importOpen = ref(false)
@@ -216,12 +247,20 @@ function showAppToast(msg: string) {
   appToastTimer = setTimeout(() => (appToast.value = ''), 3000)
 }
 
-/** 编辑态是否活跃 */
-const inEditMode = computed(() => detailMode.value === 'edit' || detailMode.value === 'new')
+/**
+ * 站主详情容器是否处于「可就地编辑」状态（**无模式**：打开一篇已发布/草稿文章、或新建空文档，
+ * 都共用同一个常驻文档容器 —— 打开即始终可编辑，编辑外壳随焦点显隐；**没有独立「编辑页」、无视图切换**）。
+ * `detailMode` 仍然保留：`list` = 列表 / 卡片流，`new` = 空文档草稿，`read` = 已打开一篇文章（站主与游客同义）。
+ */
+const ownerDocOpen = computed(
+  () => user.value?.role === 'admin' && (!!article.value || detailMode.value === 'new'),
+)
+/** 兼容既有命名：站主打开详情 = 处于可就地编辑状态（Ctrl/Cmd+S、多端提示条、离开前 flush 都按它判定） */
+const inEditMode = computed(() => ownerDocOpen.value)
 
 // ---- 多端联动（AC-24）：他端修改 → 顶部提示条（非弹窗），**绝不覆盖当前输入** ----
 // 判定逻辑（回声抑制两道闸 / 触发条件）见 `lib/wsConflict.ts`（纯逻辑，可无头实测）；
-// 本组件只做接线：提示条 UI + 阅读态「重新载入」（显式拉取最新并替换显示）。
+// 本组件只做接线：提示条 UI + 外壳收起（纯阅读）时的「重新载入」。
 const wsConflict = ref<WsConflictState | null>(null)
 const wsGate = createWsConflictGate({
   currentId: () => article.value?.id ?? null,
@@ -231,17 +270,24 @@ const wsGate = createWsConflictGate({
   onConflict: (s) => (wsConflict.value = s),
 })
 
-/** 提示条文案：他端删除（remove）与普通修改文案不同；编辑/新建态追加「你的修改仍在保存中」 */
+/** 提示条文案：他端删除（remove）与普通修改文案不同；正在就地编辑（外壳展开）时追加「你的修改仍在保存中」 */
 const wsConflictText = computed(() => {
   const s = wsConflict.value
   if (!s) return ''
+  // 无模式模型下「是否正在编辑」= 站主详情容器的编辑外壳是否展开（收起 = 纯阅读）
+  const editing = inEditMode.value && docShellActive.value
   if (s.kind === 'remove') {
-    return inEditMode.value
+    return editing
       ? '该文章已被删除或移入回收站；你的修改仍在保存中'
       : '该文章已被删除或移入回收站'
   }
-  return inEditMode.value ? '该文章已在其它端被修改；你的修改仍在保存中' : '该文章已在其它端被修改'
+  return editing ? '该文章已在其它端被修改；你的修改仍在保存中' : '该文章已在其它端被修改'
 })
+
+/** 站主详情容器：编辑外壳显隐同步（收起 = 阅读口径，展开 = 编辑口径） */
+function onDocShell(active: boolean) {
+  docShellActive.value = active
+}
 
 /** 本端即将写入（ArticleEditView 的 `writing` 事件）：刷新回声保护窗 */
 function onLocalWrite() {
@@ -274,19 +320,27 @@ async function wsBackToList() {
   article.value = null
   detailMode.value = 'list'
   clearWsConflict()
+  clearDocStack()
   docTreeKey.value++
   dataKey.value++
+  void refreshDocIndex()
 }
 
 /** WS 回调：仅 `knowledge:changed`（`update`/`create`）且命中当前文章时才可能提示 */
 function onKnowledgeChanged(msg: WsMessage) {
   wsGate.handleMessage(msg)
+  // 文章互链：任何知识库变更都可能影响「可见文章索引」（新建 / 删除 / 发布撤回 / 改名）→ 防抖刷新一次
+  scheduleDocIndexRefresh()
 }
 
-/** 阅读态「重新载入」：显式拉取最新版本并替换显示（站主带 token 才看得到自己的草稿） */
+/**
+ * 「重新载入」他端最新版本（站主详情容器在**外壳收起**＝纯阅读时的提示条按钮）：
+ * 先 `flushCurrent()` 保住本端输入（失败则中止），再整篇重挂载编辑器换成最新内容。
+ */
 async function reloadLatest() {
   const id = wsConflict.value?.id ?? article.value?.id
   if (!id) return
+  if (!(await flushCurrent())) return
   try {
     const r = await api<{ entries: import('./lib/api').KnowledgeEntry[] }>('/api/knowledge/entries', {
       headers: authHeaders(),
@@ -297,21 +351,26 @@ async function reloadLatest() {
       showAppToast('该文章已被撤回或删除')
       article.value = null
       detailMode.value = 'list'
+      clearDocStack()
       dataKey.value++
       return
     }
     article.value = latest
+    autoFocusDoc.value = false
+    docShellActive.value = false
+    editKey.value++ // 站主容器重挂载 → 编辑器用最新内容重建
     showAppToast('已载入最新版本')
   } catch (e: any) {
     showAppToast(`载入失败：${e?.message ?? e}`)
   }
 }
 
-/** 离开编辑态 / 跳转前先把内容 flush 到服务端；失败则留在编辑态（不静默丢内容） */
+/** 离开详情 / 跳转前先把内容 flush 到服务端；失败则留在当前文章（不静默丢内容） */
 async function flushCurrent(): Promise<boolean> {
-  if (!inEditMode.value) return true
-  const ok = (await editViewRef.value?.flush()) ?? true
-  if (!ok) showAppToast('保存失败，已留在编辑态')
+  const view = editViewRef.value
+  if (!view) return true // 非站主 / 未挂载编辑容器 → 无需保存
+  const ok = (await view.flush()) ?? true
+  if (!ok) showAppToast('保存失败，已留在当前文章')
   return ok
 }
 
@@ -321,6 +380,7 @@ async function goHome() {
   article.value = null
   detailMode.value = 'list'
   clearWsConflict()
+  clearDocStack()
   globalQ.value = ''
   filterCat.value = ''
   filterTag.value = ''
@@ -333,6 +393,7 @@ async function onFilterCategory(path: string) {
   article.value = null
   detailMode.value = 'list'
   clearWsConflict()
+  clearDocStack()
   tab.value = HOME_TAB
 }
 async function onFilterTag(tag: string) {
@@ -342,6 +403,7 @@ async function onFilterTag(tag: string) {
   article.value = null
   detailMode.value = 'list'
   clearWsConflict()
+  clearDocStack()
   tab.value = HOME_TAB
 }
 function onClearFilter() {
@@ -352,7 +414,11 @@ async function onOpenEntry(e: import('./lib/api').KnowledgeEntry) {
   if (!(await flushCurrent())) return
   article.value = e
   detailMode.value = 'read'
+  autoFocusDoc.value = false // 从列表点开 = 阅读定位，不主动抢焦点（点正文任意处即可编辑）
+  docShellActive.value = false
+  editKey.value++ // 换文章 → 站主容器重挂载（全新编辑器实例，内容不被上一篇污染）
   clearWsConflict() // 换了一篇文章 → 旧的多端提示条作废
+  clearDocStack() // 从列表 / 目录树 / 卡片流 / 归档 / 回收站等外部入口进入 → 新的一段阅读轨迹
   localStorage.setItem('ikit-kb-selected', e.id)
   tab.value = HOME_TAB
 }
@@ -362,29 +428,91 @@ async function onSelectTag(tag: string) {
   article.value = null
   detailMode.value = 'list'
   clearWsConflict()
+  clearDocStack()
   tab.value = HOME_TAB
 }
 function backToList() {
   article.value = null
   detailMode.value = 'list'
   clearWsConflict()
+  clearDocStack()
 }
 
-/** 进入编辑态（已有文章，就地编辑，无弹窗） */
+/**
+ * 打开内部文档链接（文章互链同页跳转）：
+ * - 目标必须命中「当前用户可见的文章索引」（不存在 / 不可见 / 草稿对非站主不可见 → 不跳转 + 提示）；
+ * - `push !== false` 时把**当前文章**压入返回栈（`detailBack()` 靠它回上一篇）；
+ * - 与既有 `detailMode` 状态机 / 草稿-发布逻辑不冲突：切换前先 `flushCurrent()`（编辑态未保存则中止），
+ *   切换后清多端冲突提示条（旧文章的提示条作废）。
+ */
+async function openDocById(id: string, opts: { push?: boolean } = {}) {
+  const push = opts.push !== false
+  const target = String(id ?? '').trim()
+  if (!target) return
+  if (!(await flushCurrent())) return
+  if (article.value?.id === target) return // 已经在这篇 → 不重复压栈 / 不重复载入
+
+  const list = docIndex.value ?? (await refreshDocIndex())
+  const hit = list?.find((e) => e.id === target)
+  // 目标不在「当前用户可见」索引内 → 不跳转（草稿对非 admin 亦视为不可见，服务端列表已天然过滤）
+  if (!hit || (user.value?.role !== 'admin' && (hit.status ?? 'published') !== 'published')) {
+    showAppToast('文档不存在或无权访问')
+    if (!push) backToList() // 返回栈里的上一篇已不可见 → 回列表（栈已清）
+    return
+  }
+
+  if (push && article.value?.id) {
+    docStack.value = [...docStack.value, article.value.id].slice(-DOC_STACK_MAX)
+  }
+  article.value = hit
+  detailMode.value = 'read'
+  autoFocusDoc.value = false
+  docShellActive.value = false
+  editKey.value++ // 互链同页跳转 → 站主容器重挂载换内容
+  clearWsConflict()
+  localStorage.setItem('ikit-kb-selected', hit.id)
+  tab.value = HOME_TAB
+}
+
+/** 详情页「返回」：有返回栈 → 弹栈回上一篇；栈空 → 回列表 */
+function detailBack() {
+  const stack = docStack.value
+  if (stack.length) {
+    const prev = stack[stack.length - 1]
+    docStack.value = stack.slice(0, -1)
+    void openDocById(prev, { push: false })
+    return
+  }
+  backToList()
+}
+
+/**
+ * 打开文章并入位编辑（目录树 `⋯ → 编辑` 入口）：无模式模型下没有独立编辑页，
+ * 这里 = 打开详情 + 直接把光标放进正文（`autoFocusDoc`）。
+ */
 async function enterEdit(entry: import('./lib/api').KnowledgeEntry) {
   if (user.value?.role !== 'admin') {
     alert('仅站主可编辑文章')
     return
   }
   if (!(await flushCurrent())) return
+  if (article.value?.id === entry.id) {
+    editViewRef.value?.focus() // 已经在这篇 → 只把焦点放回正文
+    return
+  }
   article.value = entry
   draftParentId.value = ''
+  autoFocusDoc.value = true
+  docShellActive.value = false
   editKey.value++
-  detailMode.value = 'edit'
+  detailMode.value = 'read' // 无「编辑页」：打开即就地可编辑，detailMode 不再有 edit 语义
+  clearWsConflict()
+  clearDocStack()
+  void refreshDocIndex() // 打开文档：编辑器选择器 / [[ 补全 的候选刷新一次
   tab.value = HOME_TAB
 }
 
-/** 进入「新建文章」= 详情页空白草稿编辑态（parentId 来自目录树「＋ 新建子文档」） */
+/** 进入「新建文章」= 详情容器内的空白文档（parentId 来自目录树「＋ 新建子文档」） */
 async function enterNew(parentId?: string) {
   if (user.value?.role !== 'admin') {
     alert('仅站主可编辑文章')
@@ -393,17 +521,24 @@ async function enterNew(parentId?: string) {
   if (!(await flushCurrent())) return
   article.value = null
   draftParentId.value = parentId ?? ''
+  autoFocusDoc.value = true // 空文档即聚焦
+  docShellActive.value = false
   editKey.value++
   detailMode.value = 'new'
+  clearWsConflict()
+  clearDocStack()
+  void refreshDocIndex()
   tab.value = HOME_TAB
 }
 
-/** 首次自动保存创建成功：拿到真实 id，目录树出现新条目 */
+/** 首次自动保存创建成功：拿到真实 id，目录树出现新条目（容器保持挂载 → 不丢正在输入的内容） */
 function onDraftCreated(entry: import('./lib/api').KnowledgeEntry) {
   syncLocalEntry(entry)
   clearWsConflict()
-  detailMode.value = 'edit'
+  detailMode.value = 'read' // 已是真实条目：站点容器继续就地编辑（`editKey` 不变 → 不重挂载）
+  autoFocusDoc.value = false
   docTreeKey.value++
+  void refreshDocIndex()
 }
 /** 后续 PATCH 成功：只同步本地对象（不 dataKey++，避免编辑中列表重排） */
 function onSaved(entry: import('./lib/api').KnowledgeEntry) {
@@ -414,26 +549,21 @@ function onStatusChanged(entry: import('./lib/api').KnowledgeEntry) {
   syncLocalEntry(entry)
   dataKey.value++
   docTreeKey.value++
+  void refreshDocIndex() // 发布态变化 → 非站主的可见范围随之变化
   showAppToast(entry.status === 'published' ? '已发布 · 游客现已可见' : '已撤回 · 仅站主可见')
 }
 function onDeleted() {
   article.value = null
   detailMode.value = 'list'
+  docShellActive.value = false
   clearWsConflict()
+  clearDocStack()
   docTreeKey.value++
   dataKey.value++
-}
-function onExitEdit(to: 'read' | 'list') {
-  if (to === 'read' && article.value) {
-    detailMode.value = 'read'
-    return
-  }
-  article.value = null
-  detailMode.value = 'list'
-  clearWsConflict()
+  void refreshDocIndex()
 }
 
-/** 阅读态快捷「发布」（仅站主；草稿徽标处的按钮） */
+/** 只读渲染（游客 / 非站主）快捷「发布」——站主侧已由详情容器内的发布按钮承担 */
 async function quickPublish(entry: import('./lib/api').KnowledgeEntry) {
   try {
     onLocalWrite()
@@ -463,12 +593,14 @@ function onDocsImported(payload?: { count?: number; parentId?: string }) {
   importTargetParentId.value = payload?.parentId ?? ''
   docTreeKey.value++
   dataKey.value++
+  void refreshDocIndex() // 新导入的文章立刻可被互链解析到
 }
 // 目录树批量删除 / 批量移动成功（站主）：目录树自身已 load()，这里刷新卡片流与右栏 + 轻提示
 function onDocTreeChanged(payload?: { message?: string }) {
   if (payload?.message) showAppToast(payload.message)
   loadCategories()
   dataKey.value++
+  void refreshDocIndex() // 批量删除 / 移动 / 改名 → 互链索引同步
 }
 function submitGlobalSearch() {
   if (!globalQ.value.trim()) return
@@ -536,6 +668,8 @@ provide('canWrite', computed(() => !!user.value))
 provide('userRole', computed(() => user.value?.role ?? 'guest'))
 provide('username', computed(() => user.value?.username ?? ''))
 provide('currentUser', user)
+// 文章互链：可见文章索引（模块级单例 ref，阅读端 / 编辑端共用同一份，天然去重请求）
+provide('docIndex', docIndex)
 // 编辑器主题跟随门户（VditorEditor 内 watch 切换编辑器/内容/代码主题）
 provide('theme', theme)
 // 插件管理页（PluginSettings.vue）↔ 顶部 nav / 移动 tabbar 的排序联动契约
@@ -570,6 +704,7 @@ onMounted(() => {
     })
     .finally(() => refreshPlugins())
   loadCategories()
+  void refreshDocIndex() // 启动即拉取「可见文章索引」（文章互链解析的数据源；匿名 = 仅 public）
   scheduleUpdateChecks()
   window.addEventListener('click', onDocClick)
   window.addEventListener('keydown', onKeyShortcut)
@@ -595,7 +730,7 @@ function onKeyShortcut(e: KeyboardEvent) {
     searchInput.value?.focus()
     return
   }
-  // Ctrl/Cmd+S：编辑态 → 立即保存（拦截浏览器保存对话框）；非编辑态不拦截
+  // Ctrl/Cmd+S：站主详情容器打开时 → 立即保存（拦截浏览器保存对话框）
   if (mod && e.key.toLowerCase() === 's') {
     if (inEditMode.value) {
       e.preventDefault()
@@ -615,13 +750,13 @@ function onKeyShortcut(e: KeyboardEvent) {
     searchInput.value?.focus()
     return
   }
-  // `N` 新建文章（仅站主；编辑态内不响应，避免误触丢输入）
+  // `N` 新建文章（仅站主；编辑外壳展开时不响应，避免误触丢输入；光标在编辑器内由 isTypingTarget 拦截）
   if (
     e.key.toLowerCase() === 'n' &&
     !mod &&
     !e.altKey &&
     user.value?.role === 'admin' &&
-    !inEditMode.value
+    !docShellActive.value
   ) {
     e.preventDefault()
     void enterNew('')
@@ -713,18 +848,18 @@ onUnmounted(() => {
     <!-- 轻提示（发布 / 撤回 / 保存失败等；非弹窗） -->
     <div v-if="appToast" class="app-toast">{{ appToast }}</div>
 
-    <!-- 多端冲突提示条（AC-24；非弹窗黄条，**仅站主**）：编辑态只告知、绝不覆盖输入；
-         阅读态由用户显式点「重新载入」替换内容；他端删除（remove）时给出「返回列表」 -->
+    <!-- 多端冲突提示条（AC-24；非弹窗黄条，**仅站主**）：正在就地编辑（外壳展开）时只告知、绝不覆盖输入；
+         外壳收起（纯阅读）时由用户显式点「重新载入」替换内容；他端删除（remove）时给出「返回列表」 -->
     <div v-if="wsConflict" class="app-banner" role="status">
       <span class="ub-icon">⚠️</span>
       <span class="ub-text">{{ wsConflictText }}</span>
-      <!-- 他端删除：阅读态「返回列表」；编辑/新建态「返回列表 / 继续编辑」 -->
+      <!-- 他端删除：外壳收起时「返回列表」；外壳展开（正在写）时「返回列表 / 继续编辑」 -->
       <template v-if="wsConflict.kind === 'remove'">
         <button class="ub-btn" @click="wsBackToList">返回列表</button>
-        <button v-if="inEditMode" class="ub-dismiss" title="继续编辑" @click="dismissWsConflict">继续编辑</button>
+        <button v-if="inEditMode && docShellActive" class="ub-dismiss" title="继续编辑" @click="dismissWsConflict">继续编辑</button>
       </template>
-      <!-- 他端修改：编辑态只提示（无「重新载入」→ 无 WS→编辑器回写路径）；阅读态可显式重新载入 -->
-      <template v-else-if="inEditMode">
+      <!-- 他端修改：外壳展开 → 只提示（无「重新载入」→ 无 WS→编辑器回写路径）；收起 → 可显式重新载入 -->
+      <template v-else-if="inEditMode && docShellActive">
         <button class="ub-btn" @click="dismissWsConflict">继续编辑</button>
       </template>
       <template v-else>
@@ -773,27 +908,38 @@ onUnmounted(() => {
 
       <!-- 主内容区 -->
       <main class="portal-main">
-        <ArticleDetail
-          v-if="tab === HOME_TAB && article && detailMode === 'read'"
-          :entry="article"
-          @back="backToList"
-          @edit="enterEdit"
-          @tag="onSelectTag"
-          @publish="quickPublish"
-        />
+        <!-- 站主详情：**无模式**就地编辑容器（常驻挂载 → 正文即文档形态，始终可输入；
+             编辑外壳（工具栏 / 状态条 / 字段控件视觉）随焦点显隐，点文档区外 flush 并收起） -->
         <ArticleEditView
-          v-else-if="tab === HOME_TAB && inEditMode"
+          v-if="tab === HOME_TAB && inEditMode"
           ref="editViewRef"
           :key="editKey"
           :entry="article"
           :parent-id="draftParentId"
           :categories="categoryPaths"
+          :back-label="detailBackLabel"
+          :autofocus="autoFocusDoc"
           @created="onDraftCreated"
           @saved="onSaved"
           @status="onStatusChanged"
           @writing="onLocalWrite"
-          @exit="onExitEdit"
           @deleted="onDeleted"
+          @back="detailBack"
+          @open-doc="openDocById"
+          @notify="showAppToast"
+          @shell="onDocShell"
+        />
+        <!-- 游客 / 非站主：只读渲染（既有 `ArticleDetail.vue`，不变） -->
+        <ArticleDetail
+          v-else-if="tab === HOME_TAB && article && detailMode === 'read'"
+          :entry="article"
+          :back-label="detailBackLabel"
+          @back="detailBack"
+          @edit="enterEdit"
+          @tag="onSelectTag"
+          @publish="quickPublish"
+          @open-doc="openDocById"
+          @notify="showAppToast"
         />
         <ContentCardFeed
           v-else-if="tab === HOME_TAB"
