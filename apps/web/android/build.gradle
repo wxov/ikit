@@ -32,3 +32,35 @@ allprojects {
 task clean(type: Delete) {
     delete rootProject.buildDir
 }
+
+// release 打包不跑 lint（含 capacitor-android 子模块的 lintVital*）：
+// lint 任务需要额外下载 lint-checks/lint-api/kotlin-compiler 等大依赖，
+// 在离线/网络受限的构建机上会导致 assembleRelease 失败；代码质量由 vue-tsc/tsc 与 QA 保障。
+subprojects {
+    tasks.configureEach { t ->
+        def n = t.name.toLowerCase()
+        // 禁 lint*；并禁注解抽取（extractReleaseAnnotations 内部会解析 lint 构件，离线构建时常缺包）
+        if (n.contains('lint') || n.contains('extractreleaseannotations') || n.contains('extractdebugannotations')) {
+            t.enabled = false
+        }
+    }
+}
+
+// 离线兜底：extract*Annotations 被禁用后，sync*LibJars 仍要求 typedefs.txt 存在
+// （Gradle 的输入校验发生在任务执行前，无法用 doFirst 生成）。这里在配置阶段创建空占位，
+// 保证离线/受限网络下 assembleRelease 可复现（有网络时也可直接在线构建）。
+gradle.projectsEvaluated {
+    subprojects.each { p ->
+        def variants = [
+            [variant: 'release', task: 'extractReleaseAnnotations'],
+            [variant: 'debug', task: 'extractDebugAnnotations'],
+        ]
+        variants.each { v ->
+            def f = new File(p.buildDir, "intermediates/annotations_typedef_file/${v.variant}/${v.task}/typedefs.txt")
+            if (!f.exists()) {
+                f.parentFile.mkdirs()
+                f.text = ''
+            }
+        }
+    }
+}

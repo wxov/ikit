@@ -40,6 +40,13 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+
+    // release 打包不跑 lint：lintVital 需要额外下载 lint 依赖，离线/受网络限制的构建机常因此失败。
+    // 代码质量由前端 vue-tsc + 后端 tsc 与 QA 验收保障，APK 打包不受影响。
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
 }
 
 repositories {
