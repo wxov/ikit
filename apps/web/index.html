@@ -2,7 +2,9 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover：让页面铺满刘海/挖孔屏，env(safe-area-inset-*) 才会返回真实值（否则恒为 0）
+         不禁用用户缩放（无 maximum-scale / user-scalable=no），保持可访问性 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>i-kit 控制台</title>
   </head>
   <body>

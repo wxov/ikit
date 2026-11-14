@@ -309,7 +309,9 @@ onMounted(load)
 .um-sub { font-size: 13px; color: var(--muted); }
 .um-card { margin-top: 16px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
 .um-card h4 { margin: 0 0 4px; }
-.um-group-toolbar { display: flex; gap: 8px; margin-top: 10px; }
+.um-group-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+/* 360px 窄屏：新组名输入框 / 上级组下拉 / 新建按钮允许换行并让输入框收缩，避免控件被裁到屏幕外 */
+.um-group-toolbar > .um-input { flex: 1 1 140px; min-width: 0; }
 .um-group-list { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .um-group-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; }
 .um-group-name { font-weight: 600; font-size: 14px; }

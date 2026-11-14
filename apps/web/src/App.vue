@@ -1118,7 +1118,7 @@ onUnmounted(() => {
   display: flex; align-items: center; justify-content: center;
 }
 .auth-close {
-  position: absolute; top: 8px; right: 20px;
+  position: absolute; top: calc(8px + var(--sat)); right: 20px;
   border: none; background: transparent; color: #fff;
   font-size: 28px; cursor: pointer; line-height: 1;
 }
@@ -1130,7 +1130,7 @@ onUnmounted(() => {
 /* 全局轻提示（发布/撤回等反馈） */
 .app-toast {
   position: fixed;
-  top: 72px;
+  top: calc(72px + var(--sat));
   left: 50%;
   transform: translateX(-50%);
   z-index: 600;
@@ -1177,7 +1177,7 @@ onUnmounted(() => {
 }
 .side-btn:hover { background: var(--primary-soft); }
 .side-backdrop {
-  display: none; position: fixed; inset: 60px 0 0; z-index: 385;
+  display: none; position: fixed; inset: calc(60px + var(--sat)) 0 0; z-index: 385;
   background: rgba(15, 23, 42, 0.35);
 }
 .theme-toggle {
@@ -1383,12 +1383,17 @@ onUnmounted(() => {
 
 /* 窄屏（<1200px）：单栏 + 左右侧栏收为抽屉，顶栏提供 ☰/◫ 开关 */
 @media (max-width: 1199px) {
-  .portal { grid-template-columns: minmax(0, 1fr); }
+  .portal {
+    grid-template-columns: minmax(0, 1fr);
+    padding-left: max(12px, var(--sal));
+    padding-right: max(12px, var(--sar));
+  }
   .side-toggle { display: flex; }
   .brand-sub { display: none; }
   .portal-left, .portal-right {
     position: fixed;
-    top: 60px;
+    /* 顶栏已含 --sat，抽屉从顶栏下沿开始，避免钻到状态栏/刘海下 */
+    top: calc(60px + var(--sat));
     bottom: 0;
     height: auto;
     max-height: none;
@@ -1396,9 +1401,11 @@ onUnmounted(() => {
     z-index: 410;
     border-radius: 0;
     transition: transform 0.25s ease;
+    /* 横屏刘海：抽屉左右内边距让开 --sal/--sar；底部让开手势条 */
+    padding-bottom: max(12px, var(--sab));
   }
-  .portal-left { left: 0; transform: translateX(-105%); }
-  .portal-right { right: 0; transform: translateX(105%); }
+  .portal-left { left: 0; padding-left: max(10px, var(--sal)); transform: translateX(-105%); }
+  .portal-right { right: 0; padding-right: max(10px, var(--sar)); transform: translateX(105%); }
   .portal.side-open-left .portal-left { transform: translateX(0); box-shadow: 8px 0 24px rgba(0,0,0,.15); }
   .portal.side-open-right .portal-right { transform: translateX(0); box-shadow: -8px 0 24px rgba(0,0,0,.15); }
   .side-backdrop { display: block; }
@@ -1408,23 +1415,35 @@ onUnmounted(() => {
   .topbar nav {
     display: none;
   }
-  .topbar { gap: 10px; padding: 0 12px; }
+  /* 顶栏：顶部让开状态栏/刘海（--sat），左右让开横屏刘海；高度由全局 calc(60px + --sat) 决定 */
+  .topbar {
+    gap: 10px;
+    padding: var(--sat) max(12px, var(--sar)) 0 max(12px, var(--sal));
+  }
   .ws { display: none; }
   .bottom-bar { display: none; }
+  /* 底部 Tab：高度随安全区增加（min-height 保住 56px 基准），按钮多时横向滑动而不是压缩/撑破 */
   .bottom-tabbar {
     display: flex;
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
-    height: 56px;
+    height: auto;
+    min-height: 56px;
     background: var(--panel);
     border-top: 1px solid var(--border);
     z-index: 400;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: max(4px, var(--sab));
+    padding-left: var(--sal);
+    padding-right: var(--sar);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
   }
   .bottom-tabbar button {
-    flex: 1;
+    flex: 1 0 auto;
+    min-width: 64px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -1444,20 +1463,26 @@ onUnmounted(() => {
     font-size: 18px;
     line-height: 1;
   }
-  .portal { grid-template-columns: 1fr; padding: 12px; }
+  /* 中栏左右让开横屏刘海；底部预留给固定 Tab（含手势条安全区） */
+  .portal {
+    grid-template-columns: 1fr;
+    padding: 12px max(12px, var(--sar)) 12px max(12px, var(--sal));
+  }
   .brand-sub { display: none; }
-  .global-search { flex: 1; }
+  /* 搜索框可收缩，但保证窄屏下仍有可用宽度（360px 下不再被压成 6px） */
+  .global-search { flex: 1 1 0; min-width: 96px; }
+  .global-search input { min-width: 0; }
   .portal-main, main {
-    padding-bottom: 72px;
+    padding-bottom: calc(72px + var(--sab));
   }
   .mobile-admin-sheet {
     display: flex;
     flex-direction: column;
     gap: 4px;
     position: fixed;
-    left: 8px;
-    right: 8px;
-    bottom: 64px;
+    left: max(8px, var(--sal));
+    right: max(8px, var(--sar));
+    bottom: calc(64px + var(--sab));
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -1487,5 +1512,16 @@ onUnmounted(() => {
     color: var(--primary-dark);
     font-weight: 600;
   }
+}
+
+/* 超窄屏（≤400px，如华为 Mate 60 Pro 360dp）：收起品牌名，保证搜索与操作按钮可用 */
+@media (max-width: 400px) {
+  .topbar {
+    gap: 6px;
+    padding-left: max(8px, var(--sal));
+    padding-right: max(8px, var(--sar));
+  }
+  .brand-name { display: none; }
+  .global-search { min-width: 96px; }
 }
 </style>

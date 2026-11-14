@@ -12,6 +12,11 @@ const config: CapacitorConfig = {
   },
   android: {
     allowMixedContent: true,
+    // targetSdk 35（Android 15）强制 edge-to-edge 的兜底（Capacitor 7.6+ 内置能力，无需新依赖）：
+    // auto = 仅当系统「强制」edge-to-edge（主题 opt-out 未生效）时，把 systemBars + displayCutout 的 insets
+    // 作为 WebView 的外边距，避免顶栏被状态栏、底栏被手势条遮挡；主题 opt-out 生效时不会重复留白。
+    // 对应原生实现见 node_modules/@capacitor/android/.../CapacitorWebView.java#edgeToEdgeHandler。
+    adjustMarginsForEdgeToEdge: 'auto',
   },
   ios: {
     // 允许 http 明文请求

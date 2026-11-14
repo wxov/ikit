@@ -10,6 +10,14 @@
   --danger: #ef4444;
   --ok: #22c55e;
   --warn: #f59e0b;
+  /* 移动端安全区（配合 index.html 的 viewport-fit=cover）。
+     不支持 env() 的浏览器 / 非全面屏设备回退 0px；Web 端（非 Capacitor）同样为 0。
+     Android 走 Capacitor 原生 insets（见 android/.../styles.xml + capacitor.config.ts），
+     若原生已把系统栏区域让出，这里为 0 不会产生双重留白。 */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC',
     'Microsoft YaHei', sans-serif;
 }
@@ -38,10 +46,40 @@
   box-sizing: border-box;
 }
 
+/* 整页横向溢出兜底：任何一页的宽内容（表格 / 代码 / 图片 / 工具栏）都不得把整页撑宽，
+   宽内容改为在自身容器内滚动（见 .markdown-body 系列规则）。
+   overscroll-behavior-y: none 关掉移动端整页下拉回弹露白。 */
+html {
+  height: 100%;
+  overflow-x: hidden; /* 视口兜底：整页横向滚动条永不出现 */
+  overscroll-behavior-y: none;
+}
+
+body {
+  height: 100%;
+  /* 实测注意：body 这里用 clip 而不是 hidden。
+     html 已设 overflow-x:hidden 时，body 再设 hidden 会**新建一个 body 级滚动容器**
+     （实测 window.scrollY 恒为 0，滚动发生在 body.scrollTop，影响地址栏收起 / 滚动恢复等浏览器行为）；
+     clip 不创建滚动容器 → 窗口仍是唯一滚动容器（sticky / 快捷键 / scrollIntoView 行为不变），
+     同时照样阻止宽内容撑宽页面（实测注入 2000px 宽元素后 documentElement.scrollWidth 仍 = innerWidth）。
+     不支持 clip 的旧浏览器忽略该声明，由 html 的 overflow-x:hidden 兜底。 */
+  overflow-x: clip;
+  overscroll-behavior-y: none;
+}
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
+}
+
+/* 媒体元素永不超出容器（封面图 / 正文图片 / iframe 视频 / canvas 图表） */
+img,
+video,
+iframe,
+canvas {
+  max-width: 100%;
+  height: auto;
 }
 
 /* 全局（窗口/中间栏内容）滚动条：与左右侧栏一致 —— 细、圆角、灰色 */
@@ -66,20 +104,23 @@ html::-webkit-scrollbar-corner {
 
 #app {
   min-height: 100vh;
+  min-height: 100dvh; /* 移动端地址栏收放时不再跳动；不支持的浏览器用上面的 vh 回退 */
 }
 
 .app {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
+/* 顶栏 sticky 在状态栏之下：高度包含 --sat，内容区仍为 60px，视觉不跳 */
 .topbar {
   display: flex;
   align-items: center;
   gap: 24px;
-  padding: 0 24px;
-  height: 60px;
+  padding: var(--sat) max(24px, var(--sar)) 0 max(24px, var(--sal));
+  height: calc(60px + var(--sat));
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   position: sticky;
@@ -121,6 +162,8 @@ html::-webkit-scrollbar-corner {
   gap: 6px;
   font-size: 13px;
   color: var(--muted);
+  /* 横屏窄宽度下不把「已连接」竖排成三行（顶栏可收缩的是搜索框 / nav） */
+  white-space: nowrap;
 }
 
 .ws .dot {
@@ -331,6 +374,8 @@ main.wide {
   line-height: 1.8;
   color: var(--text);
   word-wrap: break-word;
+  /* 长 URL / 无空格长串（含中文混排）在任意位置断行，避免撑破中栏 */
+  overflow-wrap: anywhere;
 }
 
 .markdown-body h1,
@@ -434,6 +479,7 @@ main.wide {
   border-radius: 10px;
   padding: 14px 16px;
   overflow-x: auto;
+  max-width: 100%;
   line-height: 1.6;
 }
 
@@ -454,10 +500,16 @@ main.wide {
   border-radius: 0 8px 8px 0;
 }
 
+/* 表格：宽表格在表格自身容器内横向滚动，不撑破页面（与 GitHub markdown 同口径）。
+   宽度用 max-content 让列按内容自然排布（避免 width:100% 把 12 列压成每列几像素、中文竖排），
+   再由 max-width:100% + overflow-x:auto 把超宽部分收进自身滚动条。 */
 .markdown-body table {
+  display: block;
   border-collapse: collapse;
   margin: 1em 0;
-  width: 100%;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .markdown-body th,
@@ -465,6 +517,9 @@ main.wide {
   border: 1px solid var(--border);
   padding: 8px 12px;
   text-align: left;
+  /* 窄屏下每列保留可读宽度（6em≈90px），整表超宽时由 table 自身横向滚动；
+     不设时 12 列表格会被压到每列 40px，中文逐字竖排。 */
+  min-width: 6em;
 }
 
 .markdown-body th {
@@ -475,6 +530,14 @@ main.wide {
 .markdown-body img {
   max-width: 100%;
   border-radius: 8px;
+}
+
+/* 行间公式（KaTeX display 模式）自身横向滚动，避免长公式撑宽页面 */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  padding: 2px 0;
 }
 
 .markdown-body hr {

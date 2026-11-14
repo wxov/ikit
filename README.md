@@ -205,6 +205,7 @@ export function apply(ctx: Context, config: Config) {
 ### Web 控制台
 
 - **响应式三栏**：≥1200px 三栏；<1200px 单栏 + 左右侧栏收为抽屉（顶栏 ☰/◫ 开关）；<768px 移动端底部 Tab；≥1600px 宽屏自适应
+- **移动端安全区**：`viewport-fit=cover` + `--sat/--sab/--sal/--sar`（`env(safe-area-inset-*)`）——顶栏让开状态栏/挖孔、底部 Tab 让开手势条、横屏刘海不压中栏；宽表格/代码/公式只在自身容器内横向滚动，整页不出现横向滚动条（详见 [docs/desktop-mobile.md](docs/desktop-mobile.md) §移动端安全区与视口适配）
 - **Markdown 阅读**：markdown-it 渲染 + highlight.js 语法高亮（20+ 语言按需注册）+ 目录 TOC 跳转
 - **文章互链（wiki 式跳转 + 返回栈）**：正文两种内部文档链接语法，点击**同页切换**到目标文章（不刷新、不新开页）：
   - `[[文章标题]]` —— 按**标题**解析（忽略大小写与空白差异）；同名多篇弹出轻量选择列表（标题 + 分类/父路径，可取消）；
@@ -230,6 +231,11 @@ export function apply(ctx: Context, config: Config) {
 - **移动端（Capacitor）**：`capacitor.config.ts`，构建时注入局域网 IP
 
 WebSocket 实时同步让三端联动（任一端的变更，其他端自动刷新）。详细构建步骤见 [docs/desktop-mobile.md](docs/desktop-mobile.md)。
+
+> **移动端构建注意（2026-11-14）**：打包 APK 前请用 `pnpm --filter @ikit/web exec cap sync android` 同步前端产物；
+> 安全区/edge-to-edge 适配已固化在 `index.html`（viewport-fit）、`src/style.css`（安全区变量）、
+> `android/.../styles.xml`（退出 Android 15 强制 edge-to-edge）与 `capacitor.config.ts`（`adjustMarginsForEdgeToEdge`），
+> 换机/升级 targetSdk 后请按 desktop-mobile.md 的机型验证步骤复测。
 
 ## API 一览
 
