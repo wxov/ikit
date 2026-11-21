@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, inject, type Ref } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, inject, type Ref } from 'vue'
 import { api, apiErrorMessage, type KnowledgeEntry } from '../lib/api'
 import { authHeaders, listGroups, type Group } from '../lib/auth'
 import DocTreeItem, { type DocNode } from './DocTreeItem.vue'
@@ -456,11 +456,31 @@ async function onDrop(targetId: string, pos: 'top' | 'middle' | 'bottom') {
   }
 }
 
+/** ⋯ 菜单为固定定位（Teleport 到 body）：滚动/缩放后与按钮错位，直接关闭；点菜单与 ⋯ 按钮之外也关闭 */
+function closeMenuOnViewportChange() {
+  if (menuFor.value) menuFor.value = ''
+}
+function onDocumentClick(e: MouseEvent) {
+  if (!menuFor.value) return
+  const t = e.target as Element | null
+  if (t && (t.closest('.doc-menu') || t.closest('.ia-btn'))) return
+  menuFor.value = ''
+}
+
 onMounted(() => {
   load()
   listGroups()
     .then((r) => (groups.value = r.groups))
     .catch(() => {})
+  window.addEventListener('scroll', closeMenuOnViewportChange, true)
+  window.addEventListener('resize', closeMenuOnViewportChange)
+  document.addEventListener('click', onDocumentClick)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', closeMenuOnViewportChange, true)
+  window.removeEventListener('resize', closeMenuOnViewportChange)
+  document.removeEventListener('click', onDocumentClick)
 })
 </script>
 

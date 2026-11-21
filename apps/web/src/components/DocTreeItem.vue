@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import type { KnowledgeEntry } from '../lib/api'
 
 export interface DocNode {
@@ -55,6 +56,40 @@ function dropPos(e: MouseEvent): 'top' | 'middle' | 'bottom' {
   if (ratio < 0.25) return 'top'
   if (ratio > 0.75) return 'bottom'
   return 'middle'
+}
+
+/** ⋯ 菜单的固定定位样式：菜单 Teleport 到 body 后按按钮位置计算（空间不足向上翻转 + 限高内部滚动） */
+const menuStyle = ref<Record<string, string>>({ position: 'fixed', top: '0px', left: '0px' })
+
+function onMenuBtn(ev: MouseEvent) {
+  const btn = ev.currentTarget as HTMLElement
+  const r = btn.getBoundingClientRect()
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const width = Math.min(220, vw - 16)
+  const left = Math.min(Math.max(8, r.right - width), Math.max(8, vw - width - 8))
+  const EST_H = 236 // 6 项估算高度；真实高度超出时由 maxHeight 内部滚动兜底
+  const openUp = vh - r.bottom < EST_H && r.top > EST_H
+  const style: Record<string, string> = {
+    position: 'fixed',
+    left: `${left}px`,
+    // 覆盖全局 .doc-menu 的 top/right（否则与 bottom 同时生效会把菜单拉伸到视口外）
+    right: 'auto',
+    top: 'auto',
+    bottom: 'auto',
+    width: `${width}px`,
+    zIndex: '1200',
+    overflowY: 'auto',
+  }
+  if (openUp) {
+    style.bottom = `${vh - r.top + 4}px`
+    style.maxHeight = `${Math.max(140, r.top - 8)}px`
+  } else {
+    style.top = `${r.bottom + 4}px`
+    style.maxHeight = `${Math.max(140, vh - r.bottom - 8)}px`
+  }
+  menuStyle.value = style
+  emit('menu', props.node.entry.id)
 }
 
 function onRowClick() {
@@ -132,17 +167,20 @@ function isCascade(id: string): boolean {
         <!-- hover 操作（仅站主） -->
         <div v-if="admin && !batchMode && !movePickMode" class="doc-item-actions" @click.stop>
           <button class="ia-btn" title="新建子文档" @click="emit('addChild', node.entry.id)">＋</button>
-          <button class="ia-btn" title="更多操作" @click="emit('menu', menuFor === node.entry.id ? '' : node.entry.id)">⋯</button>
+          <button class="ia-btn" title="更多操作" @click.stop="onMenuBtn($event)">⋯</button>
         </div>
       </div>
 
-      <!-- ⋯ 操作菜单 -->
-      <div v-if="menuFor === node.entry.id" class="doc-menu" @click.stop>
-        <div class="doc-menu-item" @click="emit('addChild', node.entry.id)">＋ 新建子文档</div>
-        <div class="doc-menu-item" @click="emit('pickMoveTarget', node.entry.id)">⇅ 移动到…</div>
-        <!-- entry-menu 插槽：当前展开菜单的条目 id 由外层 menuFor 持有（避免递归组件自引用推断） -->
-        <slot name="entry-menu" />
-      </div>
+      <!-- ⋯ 操作菜单（Teleport 到 body + 固定定位：避免被 .pl-doc-tree 的 overflow 裁剪，
+           否则深层/靠下的文档菜单只露出前几项，后几项点击会落到其它元素上） -->
+      <Teleport to="body">
+        <div v-if="menuFor === node.entry.id" class="doc-menu" :style="menuStyle" @click.stop>
+          <div class="doc-menu-item" @click="emit('addChild', node.entry.id)">＋ 新建子文档</div>
+          <div class="doc-menu-item" @click="emit('pickMoveTarget', node.entry.id)">⇅ 移动到…</div>
+          <!-- entry-menu 插槽：当前展开菜单的条目 id 由外层 menuFor 持有（避免递归组件自引用推断） -->
+          <slot name="entry-menu" />
+        </div>
+      </Teleport>
     </div>
 
     <!-- 子文档递归 -->
