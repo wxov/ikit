@@ -913,7 +913,7 @@ onUnmounted(() => {
       </aside>
 
       <!-- 主内容区 -->
-      <main class="portal-main">
+      <main class="portal-main" :class="{ 'portal-main--fit': tab === 'agent' }">
         <!-- 站主详情：**无模式**就地编辑容器（常驻挂载 → 正文即文档形态，始终可输入；
              编辑外壳（工具栏 / 状态条 / 字段控件视觉）随焦点显隐，点文档区外 flush 并收起） -->
         <ArticleEditView
@@ -1353,6 +1353,17 @@ onUnmounted(() => {
 }
 [data-theme='dark'] .portal-main { background: var(--panel); }
 .portal-main > * { width: 100%; min-width: 0; }
+
+/* 小知面板：中间栏固定为可视高度、自身不滚动；内部（对话区）滚动。
+   高度 = 视口 - 顶栏 60 - 底栏 56 - 门户上/下内边距 16/52 */
+.portal-main--fit {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 184px);
+  min-height: 0;
+  overflow: hidden;
+}
+.portal-main--fit > * { flex: 1 1 auto; min-height: 0; height: 100%; }
 .pl-moto {
   font-size: 12px;
   color: var(--muted);
@@ -1481,6 +1492,11 @@ onUnmounted(() => {
   .global-search input { min-width: 0; }
   .portal-main, main {
     padding-bottom: calc(72px + var(--sab));
+  }
+  /* 小知面板（移动端）：高度扣掉顶栏（含状态栏安全区）与底部 Tab（含手势条安全区），内部对话区滚动 */
+  .portal-main--fit {
+    height: calc(100dvh - (60px + var(--sat)) - (56px + var(--sab)) - 20px);
+    min-height: 0;
   }
   .mobile-admin-sheet {
     display: flex;

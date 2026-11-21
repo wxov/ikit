@@ -407,7 +407,9 @@ onMounted(async () => {
 .agent {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 140px);
+  /* 高度由外层中栏固定（App.vue .portal-main--fit）决定，这里只填满；不再写死 100vh-140（会超出视口导致整栏滚动） */
+  height: 100%;
+  min-height: 0;
 }
 
 .agent-login-hint {
@@ -625,10 +627,14 @@ onMounted(async () => {
 }
 
 .chat {
-  flex: 1;
-  overflow: auto;
+  /* 关键：flex 子项默认 min-height:auto 不允许收缩 → 内容会把整栏撑高；显式 min-height:0 才能让对话区自身滚动 */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   margin: 16px 0;
   padding-right: 4px;
+  overscroll-behavior: contain;
 }
 
 .msg {
