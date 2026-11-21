@@ -179,7 +179,13 @@ function isCascade(id: string): boolean {
         @drop="(id, pos) => emit('drop', id, pos)"
         @drag-end="() => emit('dragEnd')"
         @pick-move-target="(id) => emit('pickMoveTarget', id)"
-      />
+      >
+        <!-- 递归透传「⋯」菜单条目：否则只有一级目录的菜单是全的（子级会缺失 编辑/置顶/权限/删除/导入文档 等外部条目）。
+             插槽内容由外层（DocTree）提供、在 DocTree 作用域求值（menuFor 等状态共享），因此任意层级都可用。 -->
+        <template #entry-menu>
+          <slot name="entry-menu" />
+        </template>
+      </DocTreeItem>
     </template>
   </div>
 </template>
