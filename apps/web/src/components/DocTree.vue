@@ -32,6 +32,9 @@ const menuFor = ref('')
 const selectedId = ref(localStorage.getItem('ikit-kb-selected') ?? '')
 const notice = ref('')
 const busy = ref(false)
+/** 删除确认目标（null = 关闭）；deleteBusy 独立于 busy（避免与排序等操作互串） */
+const deleteTarget = ref<KnowledgeEntry | null>(null)
+const deleteBusy = ref(false)
 
 // 拖拽
 const dragId = ref('')
@@ -196,14 +199,25 @@ function onPermSaved() {
 }
 async function onDelete(e: KnowledgeEntry) {
   menuFor.value = ''
-  if (!confirm(`确认删除「${e.title}」？将移入回收站。`)) return
+  // 不用阻塞式 window.confirm：WebView / 某些环境下会被静默拦截，表现为「点删除没反应」
+  deleteTarget.value = e
+}
+
+/** 删除确认框（应用内，Teleport 到 body） */
+async function confirmDelete() {
+  const e = deleteTarget.value
+  if (!e || deleteBusy.value) return
+  deleteBusy.value = true
   try {
     await api(`/api/knowledge/entries/${e.id}`, { method: 'DELETE', headers: authHeaders() })
-    selectedId.value = ''
+    deleteTarget.value = null
+    if (selectedId.value === e.id) selectedId.value = ''
     setNotice(`已删除「${e.title}」`)
     await load()
   } catch (err: any) {
     setNotice(err.message)
+  } finally {
+    deleteBusy.value = false
   }
 }
 
@@ -575,6 +589,22 @@ onBeforeUnmount(() => {
       @close="permEntry = null"
     />
 
+    <!-- 删除确认（应用内确认框，Teleport 到 body；替代会被环境静默拦截的 window.confirm） -->
+    <Teleport to="body">
+      <div v-if="deleteTarget" class="dt-del-overlay" @click.self="deleteBusy ? undefined : (deleteTarget = null)">
+        <div class="dt-del-modal">
+          <h3>🗑 确认删除</h3>
+          <p>确认删除「{{ deleteTarget.title }}」？将移入回收站，可恢复。</p>
+          <div class="dt-del-foot">
+            <button class="dt-del-btn ghost" :disabled="deleteBusy" @click="deleteTarget = null">取消</button>
+            <button class="dt-del-btn danger" :disabled="deleteBusy" @click="confirmDelete">
+              {{ deleteBusy ? '删除中…' : '删除' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- 批量移动（可搜索层级下拉，含「顶层」）/ 批量删除（级联软删除确认） -->
     <BatchMoveDialog
       v-if="batchMoveOpen"
@@ -627,4 +657,26 @@ onBeforeUnmount(() => {
 }
 .mv-btn { border: 1px solid var(--primary); background: var(--primary); color: #fff; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; font-family: inherit; }
 .mv-btn.ghost { border-color: var(--border); background: var(--panel); color: var(--text); }
+
+/* 删除确认（应用内确认框，Teleport 到 body；层级高于编辑器与其它浮层） */
+.dt-del-overlay {
+  position: fixed; inset: 0; z-index: 1100;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.dt-del-modal {
+  width: min(400px, 94vw);
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 14px; padding: 20px;
+}
+.dt-del-modal h3 { margin: 0 0 8px; font-size: 16px; }
+.dt-del-modal p { margin: 0; font-size: 13px; color: var(--text); line-height: 1.7; word-break: break-word; }
+.dt-del-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.dt-del-btn {
+  border: 1px solid var(--primary); background: var(--primary); color: #fff;
+  border-radius: 8px; padding: 8px 18px; font-size: 14px; cursor: pointer; font-family: inherit;
+}
+.dt-del-btn.ghost { border-color: var(--border); background: var(--panel); color: var(--text); }
+.dt-del-btn.danger { border-color: #dc2626; background: #dc2626; }
+.dt-del-btn:disabled { opacity: 0.6; cursor: default; }
 </style>

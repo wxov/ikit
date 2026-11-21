@@ -53,8 +53,11 @@ async function save() {
 </script>
 
 <template>
-  <div class="perm-overlay" @click.self="emit('close')">
-    <div class="perm-modal">
+  <!-- Teleport 到 body：否则弹窗被渲染在左栏（.portal-left）的堆叠上下文里，
+       其固定定位遮罩会被中栏的富文本编辑器盖住（层级看起来在编辑器下方） -->
+  <Teleport to="body">
+    <div class="perm-overlay" @click.self="emit('close')">
+      <div class="perm-modal">
       <h3>🔒 权限设置</h3>
       <p class="perm-title">{{ entry.title }}</p>
 
@@ -86,13 +89,14 @@ async function save() {
         <button class="perm-btn" :disabled="busy" @click="save">保存</button>
         <button class="perm-btn ghost" @click="emit('close')">取消</button>
       </div>
+      </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <style scoped>
 .perm-overlay {
-  position: fixed; inset: 0; z-index: 520;
+  position: fixed; inset: 0; z-index: 1100;
   background: rgba(15, 23, 42, 0.45);
   display: flex; align-items: center; justify-content: center;
   padding: 16px;
