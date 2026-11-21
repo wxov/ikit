@@ -285,7 +285,7 @@ onMounted(async () => {
 <template>
   <div class="agent card">
     <div class="row" style="justify-content: space-between">
-      <h2 style="margin: 0">AI Agent</h2>
+      <h2 style="margin: 0">小知 · DocCurator</h2>
       <div>
         <span v-for="t in tools" :key="t.name" class="badge" :title="t.description">
           {{ t.name }}
@@ -293,9 +293,9 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- 未登录提示（保留 Agent 入口，面板内提示登录） -->
+    <!-- 未登录提示（保留小知入口，面板内提示登录） -->
     <div v-if="!loggedIn" class="agent-login-hint">
-      ⚠ 请先登录后使用 AI Agent（会话、消息与对话均需登录）。
+      ⚠ 请先登录后使用小知（DocCurator）——会话、消息与对话均需登录。
     </div>
 
     <!-- 可用节点 -->
@@ -361,7 +361,7 @@ onMounted(async () => {
 
     <div v-if="loggedIn" ref="chatEl" class="chat">
       <div v-if="!messages.length" class="empty">
-        新建会话后向 Agent 提问，它会按需调用工具（如检索知识库）来回答。<br />
+        新建会话后向小知提问，它会按需调用工具（如检索知识库）来回答。<br />
         示例：先到「知识库」添加条目，再回来问「Cordis 是什么？」
       </div>
 
@@ -371,7 +371,7 @@ onMounted(async () => {
         class="msg"
         :class="[m.role, { streaming: m.role === 'assistant' && loading && i === messages.length - 1 }]"
       >
-        <div class="msg-head">{{ m.role === 'user' ? '你' : 'Agent' }}</div>
+        <div class="msg-head">{{ m.role === 'user' ? '你' : '小知' }}</div>
 
         <div v-if="m.steps && m.steps.length" class="steps">
           <div v-for="(s, j) in m.steps" :key="j" class="step">

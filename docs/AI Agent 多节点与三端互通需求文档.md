@@ -12,7 +12,7 @@
 现有 `agent` 插件（`packages/plugins/agent`）为服务端单次问答型：
 - function-calling 多步循环（maxSteps 10）
 - 内置工具仅 `knowledge_search`（知识库检索）与 `current_time`
-- SSE 流式输出；前端 `AgentPanel.vue` 单聊窗口
+- SSE 流式输出；前端 `DocCuratorPanel.vue` 单聊窗口
 - **无会话持久化、无多会话、无跨端状态、无本地 agent**
 
 目标：升级为「可持久化多会话 + 多步任务 + 丰富工具 + 三端互通」的 agent，支持服务端与桌面端双节点运行，移动端/Web 可远程操控。
@@ -100,7 +100,7 @@ AgentMessage {
 1. `agent` 插件：服务注册、会话/消息存储、工具注册机制（多节点）。
 2. `api` 路由：会话/节点/流式接口，鉴权与多端一致。
 3. 存储：新增 `agent_sessions` / `agent_messages`（JSON 默认，SQLite 兼容）。
-4. 前端 `AgentPanel`：改为多会话 UI + 节点选择 + 过程可视化；三端复用。
+4. 前端 `DocCuratorPanel`：改为多会话 UI + 节点选择 + 过程可视化；三端复用。
 5. 桌面端（Tauri）：内嵌本地 agent 运行时 + 本地工具 + 节点注册；需原生能力。
 6. 权限：会话归属、工具执行权限（命令/文件/浏览器需白名单与授权）。
 7. WebSocket/SSE：跨端实时推流与节点中转。

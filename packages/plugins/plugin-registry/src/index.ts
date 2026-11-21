@@ -73,10 +73,12 @@ export function apply(ctx: Context, config: Config) {
   })
 
   // 默认插件（agent 为系统内置，不可卸载；knowledge 已抽取为默认功能，不在插件库管理）
+  // 注意：`name`（agent）是内部标识（插件目录/配置/接口/数据字段都用它），**不要改名**；
+  // `title` 才是用户可见名称 —— 这个 AI 助手定位为「知识库文档管理员」，对外叫小知 / DocCurator。
   const defaults: PluginRecord[] = [
     {
       name: 'agent',
-      title: 'AI Agent',
+      title: '小知 · DocCurator',
       version: '0.1.3',
       enabled: true,
       builtin: true,

@@ -17,7 +17,7 @@ import {
 } from './lib/docIndex'
 import type { PluginRecord, PluginRole, VisiblePlugins } from './lib/plugins'
 import SystemPanel from './components/SystemPanel.vue'
-import AgentPanel from './components/AgentPanel.vue'
+import DocCuratorPanel from './components/DocCuratorPanel.vue'
 import PluginSettings from './components/PluginSettings.vue'
 import PluginStore from './components/PluginStore.vue'
 import StorePluginPanel from './components/StorePluginPanel.vue'
@@ -959,7 +959,7 @@ onUnmounted(() => {
           @clear="onClearFilter"
         />
         <SystemPanel v-else-if="tab === 'system' && user?.role === 'admin'" />
-        <AgentPanel v-else-if="tab === 'agent'" />
+        <DocCuratorPanel v-else-if="tab === 'agent'" />
         <ArchiveView v-else-if="tab === 'archive'" @open="onOpenEntry" />
         <TrashView v-else-if="tab === 'trash'" @open="onOpenEntry" />
         <StorePluginPanel v-else-if="isStorePlugin(tab)" :panel="tab" />

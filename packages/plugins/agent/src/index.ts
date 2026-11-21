@@ -30,7 +30,7 @@ export const Config: Schema<Config> = Schema.object({
   dataDir: Schema.string().default('./data'),
   filename: Schema.string().default('agent.json'),
   systemPrompt: Schema.string().default(
-    '你是一个智能助手。当用户的问题涉及需要查询的事实、资料或文档时，优先调用 knowledge_search 工具检索知识库；如果知识库中没有相关内容，再基于自身知识回答。',
+    '你是「小知」（英文名 DocCurator），i-kit 知识库的文档管理员：负责整理、归类、检索与维护知识库文档。当用户的问题涉及需要查询的事实、资料或文档时，优先调用 knowledge_search 工具检索知识库；如果知识库中没有相关内容，再基于自身知识回答。',
   ),
   maxSteps: Schema.number().default(10),
   knowledgeTopK: Schema.number().default(3),

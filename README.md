@@ -113,7 +113,7 @@ pnpm dev:web
 > 升级 `vditor` 版本后执行 `pnpm --filter @ikit/web sync:vditor` 重新同步即可。
 > 前端类型检查：`pnpm --filter @ikit/web typecheck`（`vue-tsc --noEmit`，已串入 web 的 `build`）。
 
-打开 http://localhost:5173 即可看到控制台：系统状态、AI Agent 对话（流式）、知识库管理。
+打开 http://localhost:5173 即可看到控制台：系统状态、小知（DocCurator）对话（流式）、知识库管理。
 
 ### 生产模式（同源部署）
 
@@ -423,7 +423,7 @@ curl -N -X POST http://localhost:3000/api/agent/chat-stream \
 ## 后续规划
 
 - [ ] 机器人平台适配器插件（QQ / 微信 / 飞书）
-- [x] AI Agent 运行时插件（LLM 编排 + 工具调用 + RAG）
+- [x] 小知（DocCurator）运行时插件（LLM 编排 + 工具调用 + RAG；内部插件 id 仍为 `agent`）
 - [x] 流式输出（SSE）+ Markdown 实时渲染 + 停止生成
 - [x] 知识库向量检索（embedding 可选接入，余弦相似度 + 关键词融合）
 - [x] 树状分类 + 批量归类 + 回收站 + 置顶（单篇导出已随 18 条死路由移除）

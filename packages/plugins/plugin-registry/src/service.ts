@@ -263,7 +263,14 @@ export function createPluginRegistry(
         changed = true
       } else {
         const existing = byName.get(d.name)!
-        if (!existing.title) existing.title = d.title
+        // 内置插件的展示名由代码决定（如 agent → 小知 · DocCurator）：始终跟随默认值，
+        // 这样已部署实例的 plugins.json 里旧标题也能自愈；第三方插件的 title 保持原样。
+        if (d.builtin && existing.title !== d.title) {
+          existing.title = d.title
+          changed = true
+        } else if (!existing.title) {
+          existing.title = d.title
+        }
         if (!existing.panel) existing.panel = d.panel
         existing.builtin = !!d.builtin || existing.builtin
         existing.version = d.version ?? existing.version

@@ -83,7 +83,7 @@ const FAQS: Array<[string, string]> = [
           <div class="about-name">知识门户</div>
           <div class="about-meta">版本 v{{ info?.currentVersion ?? system?.version ?? '0.2.0' }}</div>
           <p class="about-desc">
-            机器人 + Web 服务 + AI Agent 成套项目，基于自研 Cordis 插件架构；知识库 / AI Agent / 插件商店 /
+            机器人 + Web 服务 + AI Agent 成套项目，基于自研 Cordis 插件架构；知识库 / 小知（DocCurator）/ 插件商店 /
             多角色权限，Web / 桌面（Tauri）/ 移动（Capacitor）三端同源。
           </p>
           <div class="about-meta">GitHub：<a class="up-link" href="https://github.com/wxov/ikit" target="_blank" rel="noopener">github.com/wxov/ikit</a></div>
