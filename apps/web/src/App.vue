@@ -1318,8 +1318,9 @@ onUnmounted(() => {
 [data-theme='dark'] .bottom-bar { box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.4); }
 .portal-left {
   position: sticky; top: 76px;
-  height: calc(100vh - 128px); /* 底部与底部栏顶部对齐 */
-  max-height: calc(100vh - 128px);
+  /* 与底部栏留 5px 间隔：100vh - 顶部偏移 76 - 底栏高 52 - 间距 5 */
+  height: calc(100vh - 133px);
+  max-height: calc(100vh - 133px);
   overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
   scrollbar-width: thin; scrollbar-color: var(--border) transparent;
   display: flex; flex-direction: column;
@@ -1331,8 +1332,8 @@ onUnmounted(() => {
 [data-theme='dark'] .portal-left { background: var(--panel); }
 .portal-right {
   position: sticky; top: 76px;
-  height: calc(100vh - 128px);
-  max-height: calc(100vh - 128px);
+  height: calc(100vh - 133px);
+  max-height: calc(100vh - 133px);
   overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
   scrollbar-width: thin; scrollbar-color: var(--border) transparent;
 }
@@ -1355,11 +1356,11 @@ onUnmounted(() => {
 .portal-main > * { width: 100%; min-width: 0; }
 
 /* 小知面板：中间栏固定为可视高度、自身不滚动；内部（对话区）滚动。
-   高度 = 视口 - 顶栏 60 - 底栏 56 - 门户上/下内边距 16/52 */
+   高度 = 视口 - 顶部偏移 76 - 底栏高 52 - 与底栏的 5px 间隔 */
 .portal-main--fit {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 184px);
+  height: calc(100vh - 133px);
   min-height: 0;
   overflow: hidden;
 }
@@ -1412,7 +1413,7 @@ onUnmounted(() => {
     position: fixed;
     /* 顶栏已含 --sat，抽屉从顶栏下沿开始，避免钻到状态栏/刘海下 */
     top: calc(60px + var(--sat));
-    bottom: 0;
+    bottom: 57px; /* 底栏高 52 + 与底栏 5px 间隔 */
     height: auto;
     max-height: none;
     width: min(320px, 84vw);
@@ -1440,19 +1441,21 @@ onUnmounted(() => {
   }
   .ws { display: none; }
   .bottom-bar { display: none; }
-  /* 底部 Tab：高度随安全区增加（min-height 保住 56px 基准），按钮多时横向滑动而不是压缩/撑破 */
+  /* 底部 Tab：固定总高 = 56px 基准 + 手势条安全区（高度确定，便于抽屉/面板精确留 5px 间隔）；
+     按钮多时横向滑动而不是压缩/撑破 */
   .bottom-tabbar {
     display: flex;
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
-    height: auto;
-    min-height: 56px;
+    height: calc(56px + var(--sab));
+    min-height: calc(56px + var(--sab));
+    box-sizing: border-box;
     background: var(--panel);
     border-top: 1px solid var(--border);
     z-index: 400;
-    padding-bottom: max(4px, var(--sab));
+    padding-bottom: var(--sab);
     padding-left: var(--sal);
     padding-right: var(--sar);
     overflow-x: auto;
@@ -1493,10 +1496,16 @@ onUnmounted(() => {
   .portal-main, main {
     padding-bottom: calc(72px + var(--sab));
   }
-  /* 小知面板（移动端）：高度扣掉顶栏（含状态栏安全区）与底部 Tab（含手势条安全区），内部对话区滚动 */
+  /* 小知面板（移动端）：高度扣掉顶栏（含状态栏安全区）与底部 Tab（含手势条安全区），内部对话区滚动；
+     底部再留 5px 与 Tab 的间隔 */
   .portal-main--fit {
-    height: calc(100dvh - (60px + var(--sat)) - (56px + var(--sab)) - 20px);
+    height: calc(100dvh - (60px + var(--sat)) - (56px + var(--sab)) - 17px);
     min-height: 0;
+  }
+  /* 移动端抽屉：底部让开 Tab 高度 + 安全区 + 5px 间隔 */
+  .portal-left, .portal-right {
+    top: calc(60px + var(--sat));
+    bottom: calc(61px + var(--sab));
   }
   .mobile-admin-sheet {
     display: flex;
