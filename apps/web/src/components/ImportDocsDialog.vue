@@ -11,6 +11,9 @@ const emit = defineEmits<{
   (e: 'imported', payload: { count: number; parentId?: string }): void
 }>()
 
+// 从目录树条目的 ⋯ 菜单「导入文档…」发起时，预填「导入到」为该条目（不传 = 顶层）
+const props = withDefaults(defineProps<{ initialParentId?: string }>(), { initialParentId: '' })
+
 // 与服务端 MAX_IMPORT_ENTRIES 一致（超出先在前端拦截，避免白跑一趟请求）
 const MAX_ENTRIES = 500
 
@@ -41,7 +44,7 @@ const result = ref('')
 // ---- 导入到：父文档选择 ----
 // 下拉本体（含「顶层」/搜索/清空）已抽为公共组件 `DocParentPicker.vue`（批量移动目标复用同一组件）；
 // 本组件只保留「完整路径」计算（供选择器候选与结果文案）与新建父文档子表单。
-const parentId = ref('')
+const parentId = ref(props.initialParentId || '')
 const allDocs = ref<DocEntry[]>([])
 const docById = computed(() => new Map(allDocs.value.map((e) => [e.id, e])))
 /** 由 parentId 关系回溯出完整路径标签，如 `技术笔记 / Vue / 组件` */

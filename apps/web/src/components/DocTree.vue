@@ -11,6 +11,8 @@ const emit = defineEmits<{
   (e: 'open', entry: KnowledgeEntry): void
   (e: 'edit', entry: KnowledgeEntry): void
   (e: 'createChild', parentId: string): void
+  /** 从条目的 ⋯ 菜单发起「导入文档」：以该条目为「导入到」默认父档 */
+  (e: 'import', parentId: string): void
   /** 批量操作成功：父组件据此刷新卡片流 / 右栏并 toast（目录树自身已 load()） */
   (e: 'changed', payload: { message: string }): void
 }>()
@@ -167,6 +169,11 @@ function onMenu(id: string) {
 function onAddChild(parentId: string) {
   menuFor.value = ''
   emit('createChild', parentId)
+}
+/** ⋯ 菜单「导入文档…」：以当前条目为默认父档打开导入弹窗 */
+function onImport(parentId: string) {
+  menuFor.value = ''
+  if (parentId) emit('import', parentId)
 }
 function onEditEntry(e: KnowledgeEntry) {
   menuFor.value = ''
@@ -527,6 +534,9 @@ onMounted(() => {
       >
         <!-- 菜单条目：当前展开的条目 id = menuFor（条目菜单仅在其 menuFor 命中时渲染） -->
         <template #entry-menu>
+          <div class="doc-menu-item" title="导入文档到该文档下" @click="onImport(menuFor)">
+            📥 导入文档…
+          </div>
           <div class="doc-menu-item" @click="onEditEntry(entries.find((e) => e.id === menuFor)!)">✏️ 编辑</div>
           <div class="doc-menu-item" @click="onTogglePin(entries.find((e) => e.id === menuFor)!)">
             {{ entries.find((e) => e.id === menuFor)?.pinned ? '📌 取消置顶' : '📌 置顶' }}

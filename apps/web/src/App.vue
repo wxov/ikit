@@ -224,6 +224,8 @@ const docShellActive = ref(false)
 const docTreeKey = ref(0)
 // 批量导入入口（仅站主）
 const importOpen = ref(false)
+// 从目录树 ⋯ 菜单发起导入时的默认父档（空 = 顶层）
+const importInitialParentId = ref('')
 // 导入挂载目标父文档：导入完成后用于目录树自动展开并定位
 const importTargetParentId = ref('')
 // 知识库数据版本：导入后自增，用于重挂载卡片流/右栏/目录树以重新拉取
@@ -580,11 +582,14 @@ async function quickPublish(entry: import('./lib/api').KnowledgeEntry) {
   }
 }
 // 批量导入文档（站主）：入口 + 导入完成后刷新列表/分类/目录树/右栏
-function openImport() {
+// parentId 可选：来自目录树条目的 ⋯ 菜单「导入文档…」，作为「导入到」默认父档（不传 = 顶层）
+function openImport(parentId?: string) {
   if (user.value?.role !== 'admin') {
     alert('仅站主可导入文档')
     return
   }
+  // 兼容直接 @click="openImport" 的写法：此时第一参是 MouseEvent，不应被当成父档 id
+  importInitialParentId.value = typeof parentId === 'string' ? parentId : ''
   importOpen.value = true
 }
 function onDocsImported(payload?: { count?: number; parentId?: string }) {
@@ -885,7 +890,7 @@ onUnmounted(() => {
           <button v-if="user?.role === 'admin'" @click="enterNew('')">
             <span class="pl-ico">✎</span> 新建文章
           </button>
-          <button v-if="user?.role === 'admin'" @click="openImport">
+          <button v-if="user?.role === 'admin'" @click="openImport()">
             <span class="pl-ico">📥</span> 导入文档
           </button>
           <div class="pl-group pl-dir-group">
@@ -899,6 +904,7 @@ onUnmounted(() => {
                 @open="onOpenEntry"
                 @edit="enterEdit"
                 @create-child="enterNew"
+                @import="openImport"
                 @changed="onDocTreeChanged"
               />
             </div>
@@ -1003,6 +1009,7 @@ onUnmounted(() => {
     <!-- 批量导入文档（仅站主，文件 / 文件夹） -->
     <ImportDocsDialog
       v-if="importOpen"
+      :initial-parent-id="importInitialParentId"
       @close="importOpen = false"
       @imported="onDocsImported"
     />
