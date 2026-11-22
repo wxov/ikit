@@ -6,7 +6,7 @@ import { apiUrl } from '../lib/config'
 import { authHeaders } from '../lib/auth'
 import type { PublicUser } from '../lib/auth'
 import { renderMarkdown } from '../lib/markdown'
-import { listModels, type LlmModelPublic } from '../lib/llm'
+import { listModels, saveModels, type LlmModelPublic } from '../lib/llm'
 
 interface AgentSession {
   id: string
@@ -81,6 +81,95 @@ async function loadModels() {
 function syncModelFromSession() {
   const cur = sessions.value.find((s) => s.id === currentId.value)?.model
   selectedModel.value = cur && models.value.some((m) => m.id === cur) ? cur : defaultModelId.value
+}
+
+// ---- 模型配置（站主，在小知面板内）----
+const isAdmin = computed(() => currentUser.value?.role === 'admin')
+
+interface ModelRow {
+  id: string
+  name: string
+  model: string
+  apiBase: string
+  apiKey: string
+  keyMask: string
+  hasKey: boolean
+  visibleToUsers: boolean
+}
+const configOpen = ref(false)
+const configRows = ref<ModelRow[]>([])
+const configDefaultId = ref('')
+const configLoading = ref(false)
+const configSaving = ref(false)
+const configNotice = ref('')
+
+function rowsFrom(list: LlmModelPublic[]): ModelRow[] {
+  return list.map((m) => ({
+    id: m.id,
+    name: m.name,
+    model: m.model,
+    apiBase: m.apiBase ?? '',
+    apiKey: '',
+    keyMask: m.keyMask,
+    hasKey: m.hasKey,
+    visibleToUsers: m.visibleToUsers,
+  }))
+}
+
+/** 打开模型配置弹窗（站主）：读取当前清单 */
+async function openModelConfig() {
+  configOpen.value = true
+  configLoading.value = true
+  configNotice.value = ''
+  modelsError.value = ''
+  try {
+    const r = await listModels()
+    configRows.value = rowsFrom(r.models)
+    configDefaultId.value = r.defaultId || r.models[0]?.id || ''
+  } catch (e: any) {
+    modelsError.value = e?.message ?? String(e)
+  } finally {
+    configLoading.value = false
+  }
+}
+
+function addConfigRow() {
+  configRows.value.push({ id: '', name: '', model: '', apiBase: '', apiKey: '', keyMask: '', hasKey: false, visibleToUsers: true })
+}
+
+function removeConfigRow(i: number) {
+  configRows.value.splice(i, 1)
+  if (!configRows.value.some((r) => r.id === configDefaultId.value)) configDefaultId.value = configRows.value[0]?.id ?? ''
+}
+
+async function saveModelConfig() {
+  configSaving.value = true
+  configNotice.value = ''
+  modelsError.value = ''
+  try {
+    const r = await saveModels({
+      models: configRows.value.map((row, i) => ({
+        id: row.id,
+        name: row.name.trim(),
+        model: row.model.trim(),
+        apiBase: row.apiBase.trim() || undefined,
+        // 留空 = 保留原密钥（服务端语义）；输入即更新
+        apiKey: row.apiKey.trim() ? row.apiKey.trim() : undefined,
+        visibleToUsers: row.visibleToUsers,
+        order: i,
+      })),
+      defaultId: configDefaultId.value,
+    })
+    configRows.value = rowsFrom(r.models)
+    configDefaultId.value = r.defaultId
+    configNotice.value = '已保存'
+    await loadModels()
+    if (!models.value.some((m) => m.id === selectedModel.value)) selectedModel.value = defaultModelId.value
+  } catch (e: any) {
+    modelsError.value = e?.message ?? String(e)
+  } finally {
+    configSaving.value = false
+  }
 }
 
 function stop() {
@@ -331,6 +420,9 @@ onMounted(async () => {
           <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name }}</option>
         </select>
         <span v-if="!models.length" class="model-hint">未配置模型</span>
+        <button v-if="isAdmin" class="model-cfg-btn" title="模型配置（增删改模型 / 默认 / 可见性）" @click="openModelConfig">
+          ⚙ 配置
+        </button>
       </div>
       <div>
         <span v-for="t in tools" :key="t.name" class="badge" :title="t.description">
@@ -446,6 +538,47 @@ onMounted(async () => {
       <button v-if="!loading" class="btn" @click="send">发送</button>
       <button v-else class="btn danger" @click="stop">停止</button>
     </div>
+
+    <!-- 模型配置（站主，小知面板内）：Teleport 到 body，避免被面板高度/滚动裁剪 -->
+    <Teleport to="body">
+      <div v-if="configOpen" class="mc-overlay" @click.self="configSaving ? undefined : (configOpen = false)">
+        <div class="mc-modal">
+          <h3>⚙ 模型配置</h3>
+          <p class="mc-hint">
+            密钥<b>只保存在服务端</b>，这里只显示掩码；<b>留空表示不修改</b>已有密钥。未单独配置密钥的模型会回落到
+            服务端 <code>.env</code> 的 <code>LLM_API_KEY</code>。
+          </p>
+          <div v-if="configLoading" class="mc-hint">加载中…</div>
+          <div v-else class="mc-list">
+            <div v-for="(m, i) in configRows" :key="i" class="mc-row">
+              <label class="mc-def" :title="m.id ? '设为默认模型' : '新模型保存后才能设为默认'">
+                <input type="radio" :checked="configDefaultId === m.id" :disabled="!m.id" @change="configDefaultId = m.id" /> 默认
+              </label>
+              <input v-model="m.name" class="mc-input" placeholder="显示名（如 DeepSeek Chat）" />
+              <input v-model="m.model" class="mc-input" placeholder="模型 id（如 deepseek-chat）" />
+              <input v-model="m.apiBase" class="mc-input" placeholder="apiBase（可选，默认用服务端配置）" />
+              <input
+                v-model="m.apiKey"
+                class="mc-input"
+                type="password"
+                :placeholder="m.hasKey ? '已保存 ' + m.keyMask + '，留空不修改' : 'API Key（可选）'"
+              />
+              <label class="mc-chk"><input type="checkbox" v-model="m.visibleToUsers" /> 对普通用户可见</label>
+              <button class="mc-del" title="删除该模型" @click="removeConfigRow(i)">删除</button>
+            </div>
+            <div class="mc-actions">
+              <button class="mc-btn" @click="addConfigRow">＋ 添加模型</button>
+              <button class="mc-btn primary" :disabled="configSaving" @click="saveModelConfig">
+                {{ configSaving ? '保存中…' : '保存' }}
+              </button>
+              <button class="mc-btn" :disabled="configSaving" @click="configOpen = false">关闭</button>
+            </div>
+            <div v-if="modelsError" class="mc-error">❌ {{ modelsError }}</div>
+            <div v-if="configNotice" class="mc-ok">✅ {{ configNotice }}</div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -789,4 +922,52 @@ onMounted(async () => {
 @media (max-width: 768px) {
   .model-pick select { max-width: 140px; }
 }
+
+/* 模型配置入口 + 弹窗（站主，小知面板内） */
+.model-cfg-btn {
+  border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  border-radius: 8px; padding: 5px 10px; font-size: 12px; cursor: pointer; font-family: inherit;
+  white-space: nowrap;
+}
+.model-cfg-btn:hover { background: var(--primary-soft); color: var(--primary-dark); }
+.mc-overlay {
+  position: fixed; inset: 0; z-index: 1100;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.mc-modal {
+  width: min(860px, 96vw); max-height: 86vh; overflow: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px;
+}
+.mc-modal h3 { margin: 0 0 8px; font-size: 16px; }
+.mc-hint { font-size: 12px; color: var(--muted); line-height: 1.7; margin: 0 0 10px; }
+.mc-hint code { background: var(--primary-soft); padding: 0 4px; border-radius: 4px; }
+.mc-list { display: flex; flex-direction: column; gap: 8px; }
+.mc-row {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.2fr) auto auto;
+  gap: 6px; align-items: center;
+  border: 1px solid var(--border); border-radius: 10px; padding: 8px;
+}
+.mc-input {
+  width: 100%; min-width: 0; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px;
+  font-size: 12px; font-family: inherit; background: var(--panel); color: var(--text);
+}
+.mc-def, .mc-chk { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.mc-del {
+  border: 1px solid var(--danger, #dc2626); color: var(--danger, #dc2626);
+  background: transparent; border-radius: 6px; padding: 4px 8px; font-size: 12px;
+  cursor: pointer; font-family: inherit;
+}
+.mc-actions { display: flex; gap: 8px; margin-top: 4px; }
+.mc-btn {
+  border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer; font-family: inherit;
+}
+.mc-btn.primary { border-color: var(--primary); background: var(--primary); color: #fff; }
+.mc-btn:disabled { opacity: 0.6; cursor: default; }
+.mc-error { font-size: 12px; color: var(--danger, #dc2626); }
+.mc-ok { font-size: 12px; color: var(--primary-dark); }
+@media (max-width: 900px) { .mc-row { grid-template-columns: 1fr 1fr; } }
 </style>
