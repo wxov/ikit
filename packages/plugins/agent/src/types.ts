@@ -1,4 +1,4 @@
-import type { ChatMessage } from '@ikit/plugin-llm'
+import type { ChatMessage, LlmChatOptions } from '@ikit/plugin-llm'
 import type { Viewer } from '@ikit/plugin-knowledge'
 
 /**
@@ -54,6 +54,8 @@ export interface AgentSession {
   /** 归属用户 id（迁移后为必填；容错旧数据保留可选） */
   ownerId?: string
   title: string
+  /** 该会话选用的模型记录 id（llm 模型清单里的一条；缺省 = 默认模型） */
+  model?: string
   createdAt: string
   updatedAt: string
 }
@@ -121,11 +123,18 @@ export interface AgentService {
   registerTool(tool: AgentTool): () => void
   listTools(): AgentToolInfo[]
   runTool(name: string, args: Record<string, unknown>, call?: AgentCallContext): Promise<string>
-  runStream(userMessage: string, history?: ChatMessage[], call?: AgentCallContext): AsyncIterable<AgentStreamEvent>
+  runStream(
+    userMessage: string,
+    history?: ChatMessage[],
+    call?: AgentCallContext,
+    llmOptions?: LlmChatOptions,
+  ): AsyncIterable<AgentStreamEvent>
   /** 会话管理（按 ownerId 隔离；admin 无特殊例外，与其他用户一致） */
   listSessions(ownerId: string): Promise<AgentSession[]>
   createSession(ownerId: string, title?: string): Promise<AgentSession>
   renameSession(ownerId: string, id: string, title: string): Promise<AgentSession[]>
+  /** 设置会话选用的模型（llm 模型清单记录 id；不传 = 清除，回到默认模型） */
+  setSessionModel(ownerId: string, id: string, model?: string): Promise<AgentSession | undefined>
   deleteSession(ownerId: string, id: string): Promise<AgentSession[]>
   listMessages(ownerId: string, sessionId: string): Promise<AgentMessage[]>
   appendMessage(ownerId: string, sessionId: string, input: AgentMessageInput): Promise<AgentMessage | undefined>

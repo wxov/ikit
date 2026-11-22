@@ -1,5 +1,6 @@
 import { Schema } from 'cordis'
 import type { Context } from 'cordis'
+import { resolve } from 'node:path'
 import type {
   ChatMessage,
   ChatStreamEvent,
@@ -7,6 +8,7 @@ import type {
   LlmResponse,
   LlmService,
 } from './types.js'
+import { createModelRegistry } from './models.js'
 
 export const name = 'llm'
 
@@ -20,6 +22,8 @@ export interface Config {
   embeddingApiBase?: string
   embeddingApiKey?: string
   embeddingModel?: string
+  /** 模型清单存储文件（默认 ./data/llm-models.json；可指向数据目录） */
+  modelsFile?: string
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -32,6 +36,7 @@ export const Config: Schema<Config> = Schema.object({
   embeddingApiBase: Schema.string().default('https://api.siliconflow.cn/v1'),
   embeddingApiKey: Schema.string().default(''),
   embeddingModel: Schema.string().default('BAAI/bge-m3'),
+  modelsFile: Schema.string().default('./data/llm-models.json'),
 })
 
 export function apply(ctx: Context, config: Config) {
@@ -52,18 +57,21 @@ export function apply(ctx: Context, config: Config) {
   const embeddingEnabled = !!embeddingApiKey
 
   async function chat(messages: ChatMessage[], options: LlmChatOptions = {}): Promise<LlmResponse> {
-    if (!apiKey) {
+    const useKey = options.apiKey ?? apiKey
+    if (!useKey) {
       throw new Error('LLM 未配置 API Key（请设置环境变量 LLM_API_KEY 或配置 apiKey）')
     }
+    const useBase = (options.apiBase ?? apiBase).replace(/\/+$/, '')
+    const useModel = options.model ?? model
 
-    const res = await fetch(`${apiBase}/chat/completions`, {
+    const res = await fetch(`${useBase}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${useKey}`,
       },
       body: JSON.stringify({
-        model,
+        model: useModel,
         messages,
         temperature: options.temperature ?? temperature,
         max_tokens: options.maxTokens ?? maxTokens,
@@ -97,18 +105,21 @@ export function apply(ctx: Context, config: Config) {
     messages: ChatMessage[],
     options: LlmChatOptions = {},
   ): AsyncIterable<ChatStreamEvent> {
-    if (!apiKey) {
+    const useKey = options.apiKey ?? apiKey
+    if (!useKey) {
       throw new Error('LLM 未配置 API Key（请设置环境变量 LLM_API_KEY 或配置 apiKey）')
     }
+    const useBase = (options.apiBase ?? apiBase).replace(/\/+$/, '')
+    const useModel = options.model ?? model
 
-    const res = await fetch(`${apiBase}/chat/completions`, {
+    const res = await fetch(`${useBase}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${useKey}`,
       },
       body: JSON.stringify({
-        model,
+        model: useModel,
         messages,
         stream: true,
         temperature: options.temperature ?? temperature,
@@ -214,13 +225,23 @@ export function apply(ctx: Context, config: Config) {
   }
 
   ctx.set('llm', service)
+
+  // 模型清单（「小知」模型配置与选择）：JSON 持久化 + 首次用当前 Config 种子
+  const modelRegistry = createModelRegistry({
+    file: resolve(process.cwd(), config.modelsFile ?? './data/llm-models.json'),
+    seed: { model, apiBase, apiKey },
+  })
+  ctx.set('llmModels', modelRegistry)
+
   ctx.on('dispose', () => {
     console.log('[llm] plugin disposed')
   })
 
   console.log(`[llm] plugin started, model = "${model}", configured = ${!!apiKey}`)
+  console.log(`[llm] models: ${modelRegistry.listAll().models.length} 条，default=${modelRegistry.listAll().defaultId}`)
   console.log(`[llm] embedding: model = "${embeddingModel}", enabled = ${embeddingEnabled}`)
 }
 
 export default { name, apply, Config }
 export * from './types.js'
+export * from './models.js'

@@ -23,7 +23,7 @@ import type {
   Viewer,
   VisibilitySyncMode,
 } from '@ikit/plugin-knowledge'
-import type { ChatMessage, LlmService } from '@ikit/plugin-llm'
+import type { ChatMessage, LlmService, LlmModelRegistry } from '@ikit/plugin-llm'
 import type {
   AgentRunResult,
   AgentService,
@@ -37,6 +37,7 @@ declare module 'cordis' {
     demo: DemoService
     knowledge: KnowledgeService
     llm: LlmService
+    llmModels: LlmModelRegistry
     agent: AgentService
     pluginRegistry: import('@ikit/plugin-registry').PluginRegistryService
     account: import('@ikit/plugin-account').AccountService

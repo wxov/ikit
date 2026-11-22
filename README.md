@@ -115,6 +115,8 @@ pnpm dev:web
 
 打开 http://localhost:5173 即可看到控制台：系统状态、小知（DocCurator）对话（流式）、知识库管理。
 
+> 小知支持**多模型**：站主在「设置 → 模型配置」添加模型（显示名 / 模型 id / apiBase / API Key）并设默认；小知面板顶部可切换模型（**按会话记忆**）。密钥仅存服务端，界面只显示掩码。
+
 ### 生产模式（同源部署）
 
 ```bash
@@ -375,6 +377,8 @@ node scripts/sign-plugin.mjs --zip tmp/hello-signed.zip --print-hash
 | DELETE | `/api/agent/sessions/:id` | 删除会话（登录/归属） |
 | GET | `/api/agent/sessions/:id/messages` | 会话消息（登录/归属） |
 | POST | `/api/agent/sessions/:id/chat-stream` | 会话内流式对话（SSE，登录/归属） |
+| GET | `/api/llm/models` | 模型清单（登录；站主全部、其他用户仅「对普通用户可见」，密钥只返回掩码） |
+| PUT | `/api/llm/models` | 保存模型清单 + 默认模型（站主） |
 | POST | `/api/agent/chat-stream` | 流式对话（SSE，登录） |
 | GET | `/api/agent/nodes` | 节点列表（登录） |
 | POST | `/api/agent/nodes/register` | 注册节点（登录） |

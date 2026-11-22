@@ -94,6 +94,8 @@ async function main() {
       embeddingApiBase: process.env.EMBEDDING_API_BASE ?? 'https://api.siliconflow.cn/v1',
       embeddingApiKey: process.env.EMBEDDING_API_KEY ?? '',
       embeddingModel: process.env.EMBEDDING_MODEL ?? 'BAAI/bge-m3',
+      // 模型清单（小知模型配置与选择）存储路径；默认 ./data/llm-models.json（随 data 卷持久化）
+      modelsFile: process.env.LLM_MODELS_FILE || undefined,
     },
   })
 

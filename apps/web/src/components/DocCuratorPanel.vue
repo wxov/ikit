@@ -6,11 +6,14 @@ import { apiUrl } from '../lib/config'
 import { authHeaders } from '../lib/auth'
 import type { PublicUser } from '../lib/auth'
 import { renderMarkdown } from '../lib/markdown'
+import { listModels, type LlmModelPublic } from '../lib/llm'
 
 interface AgentSession {
   id: string
   ownerId?: string
   title: string
+  /** 该会话选用的模型（llm 模型清单记录 id；缺省 = 默认模型） */
+  model?: string
   createdAt: string
   updatedAt: string
 }
@@ -50,6 +53,35 @@ const renamingId = ref('')
 const renameInput = ref('')
 const chatEl = ref<HTMLElement | null>(null)
 let abortController: AbortController | null = null
+
+// ---- 模型选择（2026-11-22）：按会话记忆；非站主只看到「对普通用户可见」的模型 ----
+const models = ref<LlmModelPublic[]>([])
+const defaultModelId = ref('')
+const selectedModel = ref('')
+const modelsError = ref('')
+
+async function loadModels() {
+  if (!loggedIn.value) return
+  try {
+    const r = await listModels()
+    models.value = r.models
+    defaultModelId.value = r.defaultId || r.models[0]?.id || ''
+    // 当前选中模型若已失效（被删除/无权），回落到默认
+    if (!models.value.some((m) => m.id === selectedModel.value)) {
+      const cur = sessions.value.find((s) => s.id === currentId.value)?.model
+      selectedModel.value = models.value.some((m) => m.id === cur) ? (cur as string) : defaultModelId.value
+    }
+    modelsError.value = ''
+  } catch (e: any) {
+    modelsError.value = e?.message ?? String(e)
+  }
+}
+
+/** 切换会话/新建后，回显该会话记住的模型（缺省用默认模型） */
+function syncModelFromSession() {
+  const cur = sessions.value.find((s) => s.id === currentId.value)?.model
+  selectedModel.value = cur && models.value.some((m) => m.id === cur) ? cur : defaultModelId.value
+}
 
 function stop() {
   abortController?.abort()
@@ -124,6 +156,7 @@ async function loadSessions() {
     const r = await api<{ sessions: AgentSession[] }>('/api/agent/sessions', { headers: authHeaders() })
     sessions.value = r.sessions
     if (!currentId.value && sessions.value.length) currentId.value = sessions.value[0].id
+    syncModelFromSession()
   } catch (e: any) {
     error.value = e.message
   }
@@ -149,6 +182,7 @@ async function loadMessages() {
 
 async function selectSession(id: string) {
   currentId.value = id
+  syncModelFromSession()
   await loadMessages()
 }
 
@@ -163,6 +197,7 @@ async function newSession() {
     })
     sessions.value = r.sessions
     currentId.value = r.session.id
+    selectedModel.value = defaultModelId.value
     messages.value = []
     error.value = ''
   } catch (e: any) {
@@ -180,6 +215,7 @@ async function deleteSession(id: string) {
     sessions.value = r.sessions
     if (currentId.value === id) {
       currentId.value = sessions.value[0]?.id ?? ''
+      syncModelFromSession()
       await loadMessages()
     }
   } catch (e: any) {
@@ -220,7 +256,7 @@ async function send() {
     const res = await fetch(apiUrl(`/api/agent/sessions/${currentId.value}/chat-stream`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ message: text }),
+      body: JSON.stringify({ message: text, model: selectedModel.value || undefined }),
       signal: abortController.signal,
     })
     if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
@@ -276,8 +312,10 @@ onMounted(async () => {
   loadTools()
   loadNodes()
   if (loggedIn.value) {
+    await loadModels()
     await loadSessions()
     if (currentId.value) await loadMessages()
+    syncModelFromSession()
   }
 })
 </script>
@@ -286,6 +324,14 @@ onMounted(async () => {
   <div class="agent card">
     <div class="row" style="justify-content: space-between">
       <h2 style="margin: 0">小知 · DocCurator</h2>
+      <!-- 模型选择：按会话记忆（服务端随消息持久化）；非站主只看到「对普通用户可见」的模型 -->
+      <div v-if="loggedIn" class="model-pick" :title="modelsError || '选择本会话使用的模型'">
+        <label>模型</label>
+        <select v-model="selectedModel" :disabled="!models.length">
+          <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name }}</option>
+        </select>
+        <span v-if="!models.length" class="model-hint">未配置模型</span>
+      </div>
       <div>
         <span v-for="t in tools" :key="t.name" class="badge" :title="t.description">
           {{ t.name }}
@@ -724,5 +770,23 @@ onMounted(async () => {
   font-size: 14px;
   line-height: 1.7;
   max-width: 100%;
+}
+
+/* 模型选择器（小知头部） */
+.model-pick {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--muted); flex: 0 0 auto;
+}
+.model-pick label { white-space: nowrap; }
+.model-pick select {
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel); color: var(--text);
+  padding: 5px 8px; font-size: 12px; font-family: inherit;
+  max-width: 200px;
+}
+.model-pick select:disabled { opacity: 0.6; }
+.model-hint { font-size: 12px; color: var(--muted); }
+@media (max-width: 768px) {
+  .model-pick select { max-width: 140px; }
 }
 </style>

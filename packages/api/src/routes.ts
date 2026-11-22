@@ -125,6 +125,30 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     return { viewer: await viewerOf(user), userId: user?.id as string | undefined }
   }
 
+  /**
+   * 解析「小知」本次请求使用的模型（2026-11-22 模型配置与选择）：
+   * - 未指定 → 默认模型；
+   * - 指定 → 必须在「该角色可见的模型清单」内（非 admin 只能用 visibleToUsers 的），否则 400；
+   * - 返回可直接透传给 llm 的 { model, apiBase?, apiKey? }。
+   */
+  function resolveAgentModel(
+    user: any,
+    requested?: string,
+  ):
+    | { ok: true; rec: { id: string; model: string; apiBase?: string; apiKey?: string } }
+    | { ok: false; error: string } {
+    const rid = (requested ?? '').trim()
+    const view = ctx.llmModels.listPublic(user?.role)
+    if (rid && !view.models.some((m) => m.id === rid)) {
+      return { ok: false, error: '无权使用该模型或模型不存在' }
+    }
+    try {
+      return { ok: true, rec: ctx.llmModels.resolve(rid || undefined) }
+    } catch (e: any) {
+      return { ok: false, error: e?.message ?? '模型配置不可用' }
+    }
+  }
+
   function normalizeVisibility(v: string | undefined): EntryVisibility | null {
     return v === 'public' || v === 'login' || v === 'groups' || v === 'private' ? v : null
   }
@@ -1092,13 +1116,18 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   app.post('/api/agent/sessions/:id/chat-stream', (req, reply) =>
     requireUser(req, reply, async (user) => {
       const id = (req.params as { id: string }).id
-      const body = req.body as { message?: string }
+      const body = req.body as { message?: string; model?: string }
       if (!body?.message?.trim()) {
         return reply.code(400).send({ error: 'message is required' })
       }
       // 归属校验必须在 writeHead 之前完成（否则无法返回 404）
       const session = await ctx.agent.getSession(user.id, id)
       if (!session) return reply.code(404).send({ error: '会话不存在' })
+
+      // 模型选择（按会话记忆）：校验可见性 → 解析调用参数（含 baseUrl/key），并持久化到会话
+      const picked = resolveAgentModel(user, body.model)
+      if (!picked.ok) return reply.code(400).send({ error: picked.error })
+      await ctx.agent.setSessionModel(user.id, id, picked.rec.id)
 
       // 持久化用户消息，并用之前的消息作为历史
       await ctx.agent.appendMessage(user.id, id, { role: 'user', content: body.message })
@@ -1116,7 +1145,11 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
       const steps: Array<{ toolName: string; toolArgs: Record<string, unknown>; toolResult: string }> = []
       const call = await callOf(user)
       try {
-        for await (const ev of ctx.agent.runStream(body.message, priorHistory, call)) {
+        for await (const ev of ctx.agent.runStream(body.message, priorHistory, call, {
+          model: picked.rec.model,
+          apiBase: picked.rec.apiBase,
+          apiKey: picked.rec.apiKey,
+        })) {
           if (ev.type === 'delta') assistantContent += ev.content
           else if (ev.type === 'tool') {
             steps.push({ toolName: ev.toolName, toolArgs: ev.toolArgs, toolResult: ev.toolResult })
@@ -1136,10 +1169,12 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   // Agent 流式输出（SSE）（通用，无会话；登录鉴权，与 /api/llm/chat-stream 一致）
   app.post('/api/agent/chat-stream', (req, reply) =>
     requireUser(req, reply, async (user) => {
-      const body = req.body as { message?: string; history?: ChatMessage[] }
+      const body = req.body as { message?: string; history?: ChatMessage[]; model?: string }
       if (!body?.message?.trim()) {
         return reply.code(400).send({ error: 'message is required' })
       }
+      const pickedGeneric = resolveAgentModel(user, body.model)
+      if (!pickedGeneric.ok) return reply.code(400).send({ error: pickedGeneric.error })
       const call = await callOf(user)
       const raw = reply.raw
       raw.writeHead(200, {
@@ -1149,7 +1184,11 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
         'X-Accel-Buffering': 'no',
       })
       try {
-        for await (const ev of ctx.agent.runStream(body.message, body.history ?? [], call)) {
+        for await (const ev of ctx.agent.runStream(body.message, body.history ?? [], call, {
+          model: pickedGeneric.rec.model,
+          apiBase: pickedGeneric.rec.apiBase,
+          apiKey: pickedGeneric.rec.apiKey,
+        })) {
           raw.write(`data: ${JSON.stringify(ev)}\n\n`)
         }
       } catch (e) {
@@ -1158,6 +1197,26 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
         )
       }
       raw.end()
+    }),
+  )
+
+  // ---- LLM 模型清单（2026-11-22：小知的模型配置与选择）----
+  // 站主：全部模型；其他登录用户：仅 visibleToUsers 的模型。响应永不含明文 apiKey（只给掩码）。
+  app.get('/api/llm/models', (req, reply) =>
+    requireUser(req, reply, async (user) => ctx.llmModels.listPublic(user.role)),
+  )
+  // 站主保存整份清单（含默认模型）；校验失败 → 400 { error }
+  app.put('/api/llm/models', (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      const body = req.body as { models?: unknown; defaultId?: string }
+      try {
+        return ctx.llmModels.save({
+          models: Array.isArray(body?.models) ? (body.models as any[]) : [],
+          defaultId: body?.defaultId ?? '',
+        })
+      } catch (e: any) {
+        return reply.code(400).send({ error: e?.message ?? '模型配置保存失败' })
+      }
     }),
   )
 

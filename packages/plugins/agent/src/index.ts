@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { Schema } from 'cordis'
 import type { Context } from 'cordis'
-import type { ChatMessage, LlmService, LlmToolDefinition } from '@ikit/plugin-llm'
+import type { ChatMessage, LlmChatOptions, LlmService, LlmToolDefinition } from '@ikit/plugin-llm'
 import type { KnowledgeService, Viewer } from '@ikit/plugin-knowledge'
 import { JsonAgentStore, type AgentStore } from './store.js'
 import type { AgentCallContext, AgentMessage, AgentMessageInput, AgentNode, AgentNodeInput, AgentService, AgentSession, AgentStreamEvent, AgentTask, AgentTaskInput, AgentTool } from './types.js'
@@ -198,6 +198,7 @@ export function apply(_ctx: Context, config: Config) {
     userMessage: string,
     history: ChatMessage[] = [],
     call?: AgentCallContext,
+    llmOptions: LlmChatOptions = {},
   ): AsyncIterable<AgentStreamEvent> {
     const messages: ChatMessage[] = [
       { role: 'system', content: config.systemPrompt ?? '' },
@@ -209,7 +210,7 @@ export function apply(_ctx: Context, config: Config) {
     for (let i = 0; i < maxSteps; i++) {
       yield { type: 'status', status: i === 0 ? '思考中…' : `思考中…（第 ${i + 1} 轮）` }
       let msg: ChatMessage | undefined
-      for await (const ev of ctx.llm.chatStream(messages, { tools: toLlmTools() })) {
+      for await (const ev of ctx.llm.chatStream(messages, { tools: toLlmTools(), ...llmOptions })) {
         if (ev.type === 'delta') {
           yield { type: 'delta', content: ev.content }
         } else {
@@ -332,6 +333,22 @@ export function apply(_ctx: Context, config: Config) {
       await store.save(db)
     }
     return listSessions(ownerId)
+  }
+
+  /** 设置会话选用的模型（模型清单记录 id）；不传 = 清除，回到默认模型 */
+  async function setSessionModel(
+    ownerId: string,
+    id: string,
+    model?: string,
+  ): Promise<AgentSession | undefined> {
+    const db = await loadDb()
+    const s = db.sessions.find((x) => x.id === id && x.ownerId === ownerId)
+    if (!s) return undefined
+    if (model) s.model = model
+    else delete s.model
+    s.updatedAt = new Date().toISOString()
+    await store.save(db)
+    return s
   }
 
   async function deleteSession(ownerId: string, id: string): Promise<AgentSession[]> {
@@ -494,6 +511,7 @@ export function apply(_ctx: Context, config: Config) {
     listSessions,
     createSession,
     renameSession,
+    setSessionModel,
     deleteSession,
     listMessages,
     appendMessage,

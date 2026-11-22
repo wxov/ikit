@@ -1,10 +1,97 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, inject, ref, onMounted, type Ref } from 'vue'
 import { api } from '../lib/api'
+import { listModels, saveModels, type LlmModelPublic } from '../lib/llm'
 import { fetchUpdateManifest, hasUpdate as hasUpdateFn, detectPlatform, type UpdateInfo } from '../lib/update'
 
 const emit = defineEmits<{ (e: 'close'): void; (e: 'request-update', info: UpdateInfo): void }>()
-const tab = ref<'update' | 'about' | 'help'>('update')
+const tab = ref<'update' | 'about' | 'help' | 'models'>('update')
+const userRole = inject<Ref<string>>('userRole', ref('guest'))
+const isAdmin = computed(() => userRole.value === 'admin')
+
+// ---- 模型配置（仅站主）：小知可选模型清单 ----
+interface ModelRow {
+  id: string
+  name: string
+  model: string
+  apiBase: string
+  apiKey: string
+  keyMask: string
+  hasKey: boolean
+  visibleToUsers: boolean
+}
+const rows = ref<ModelRow[]>([])
+const defaultId = ref('')
+const modelsLoading = ref(false)
+const modelsSaving = ref(false)
+const modelsError = ref('')
+const modelsNotice = ref('')
+
+function toRows(list: LlmModelPublic[]): ModelRow[] {
+  return list.map((m) => ({
+    id: m.id,
+    name: m.name,
+    model: m.model,
+    apiBase: m.apiBase ?? '',
+    apiKey: '',
+    keyMask: m.keyMask,
+    hasKey: m.hasKey,
+    visibleToUsers: m.visibleToUsers,
+  }))
+}
+
+async function loadModels() {
+  if (!isAdmin.value) return
+  modelsLoading.value = true
+  modelsError.value = ''
+  modelsNotice.value = ''
+  try {
+    const r = await listModels()
+    rows.value = toRows(r.models)
+    defaultId.value = r.defaultId || r.models[0]?.id || ''
+  } catch (e: any) {
+    modelsError.value = e?.message ?? String(e)
+  } finally {
+    modelsLoading.value = false
+  }
+}
+
+function addModel() {
+  rows.value.push({ id: '', name: '', model: '', apiBase: '', apiKey: '', keyMask: '', hasKey: false, visibleToUsers: true })
+}
+
+function removeModel(i: number) {
+  rows.value.splice(i, 1)
+  if (!rows.value.some((r) => r.id === defaultId.value)) defaultId.value = rows.value[0]?.id ?? ''
+}
+
+async function saveModelList() {
+  modelsSaving.value = true
+  modelsError.value = ''
+  modelsNotice.value = ''
+  try {
+    const r = await saveModels({
+      models: rows.value.map((row, i) => ({
+        id: row.id,
+        name: row.name.trim(),
+        model: row.model.trim(),
+        apiBase: row.apiBase.trim() || undefined,
+        // 留空 = 保留原密钥（服务端语义）；输入即更新
+        apiKey: row.apiKey.trim() ? row.apiKey.trim() : undefined,
+        visibleToUsers: row.visibleToUsers,
+        order: i,
+      })),
+      defaultId: defaultId.value,
+    })
+    rows.value = toRows(r.models)
+    defaultId.value = r.defaultId
+    modelsNotice.value = '已保存'
+  } catch (e: any) {
+    modelsError.value = e?.message ?? String(e)
+  } finally {
+    modelsSaving.value = false
+  }
+}
 const info = ref<UpdateInfo | null>(null)
 const checking = ref(false)
 const checked = ref(false)
@@ -37,6 +124,7 @@ async function loadSystem() {
 onMounted(() => {
   checkUpdate()
   loadSystem()
+  if (isAdmin.value) loadModels()
 })
 
 const FAQS: Array<[string, string]> = [
@@ -60,6 +148,7 @@ const FAQS: Array<[string, string]> = [
         <button :class="{ on: tab === 'update' }" @click="tab = 'update'">检查更新</button>
         <button :class="{ on: tab === 'about' }" @click="tab = 'about'">关于</button>
         <button :class="{ on: tab === 'help' }" @click="tab = 'help'">帮助</button>
+        <button v-if="isAdmin" :class="{ on: tab === 'models' }" @click="tab = 'models'; loadModels()">模型配置</button>
       </nav>
 
       <section v-if="tab === 'update'" class="st-body">
@@ -90,12 +179,48 @@ const FAQS: Array<[string, string]> = [
         </div>
       </section>
 
-      <section v-else class="st-body">
+      <section v-else-if="tab === 'help'" class="st-body">
         <div class="faq-list">
           <details v-for="[q, a] in FAQS" :key="q" class="faq-item">
             <summary class="faq-q">{{ q }}</summary>
             <p class="faq-a">{{ a }}</p>
           </details>
+        </div>
+      </section>
+
+      <!-- 模型配置（仅站主）：小知可选模型清单；密钥只保存于服务端，界面仅显示掩码 -->
+      <section v-else-if="tab === 'models'" class="st-body">
+        <p class="md-hint">
+          「小知」可用的模型清单。密钥<b>只保存在服务端</b>，这里只显示掩码；<b>留空表示不修改</b>已有密钥。
+          未单独配置密钥的模型，会回落到服务端 <code>.env</code> 的 <code>LLM_API_KEY</code>。
+        </p>
+        <div v-if="!isAdmin" class="md-error">仅站主可配置模型。</div>
+        <div v-else-if="modelsLoading" class="md-hint">加载中…</div>
+        <div v-else class="md-list">
+          <div v-for="(m, i) in rows" :key="i" class="md-row">
+            <label class="md-def" :title="m.id ? '设为默认模型' : '新模型保存后才能设为默认'">
+              <input type="radio" :checked="defaultId === m.id" :disabled="!m.id" @change="defaultId = m.id" /> 默认
+            </label>
+            <input v-model="m.name" class="md-input" placeholder="显示名（如 DeepSeek Chat）" />
+            <input v-model="m.model" class="md-input" placeholder="模型 id（如 deepseek-chat）" />
+            <input v-model="m.apiBase" class="md-input" placeholder="apiBase（可选，默认用服务端配置）" />
+            <input
+              v-model="m.apiKey"
+              class="md-input"
+              type="password"
+              :placeholder="m.hasKey ? '已保存 ' + m.keyMask + '，留空不修改' : 'API Key（可选）'"
+            />
+            <label class="md-chk"><input type="checkbox" v-model="m.visibleToUsers" /> 对普通用户可见</label>
+            <button class="md-del" title="删除该模型" @click="removeModel(i)">删除</button>
+          </div>
+          <div class="md-actions">
+            <button class="st-btn" @click="addModel">＋ 添加模型</button>
+            <button class="st-btn" :disabled="modelsSaving" @click="saveModelList">
+              {{ modelsSaving ? '保存中…' : '保存' }}
+            </button>
+          </div>
+          <div v-if="modelsError" class="md-error">❌ {{ modelsError }}</div>
+          <div v-if="modelsNotice" class="md-ok">✅ {{ modelsNotice }}</div>
         </div>
       </section>
     </div>
@@ -147,4 +272,33 @@ const FAQS: Array<[string, string]> = [
 .faq-item { border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; background: var(--bg); }
 .faq-q { font-size: 13px; font-weight: 600; cursor: pointer; }
 .faq-a { font-size: 12px; color: var(--muted); line-height: 1.7; margin: 6px 0 0; }
+
+/* ---- 模型配置（仅站主）---- */
+.md-hint { font-size: 12px; color: var(--muted); line-height: 1.7; margin: 0 0 10px; }
+.md-hint code { background: var(--primary-soft); padding: 0 4px; border-radius: 4px; }
+.md-list { display: flex; flex-direction: column; gap: 8px; }
+.md-row {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.2fr) auto auto;
+  gap: 6px; align-items: center;
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px;
+}
+.md-input {
+  width: 100%; min-width: 0; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px;
+  font-size: 12px; font-family: inherit; background: var(--panel); color: var(--text);
+}
+.md-def, .md-chk { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.md-del {
+  border: 1px solid var(--danger, #dc2626); color: var(--danger, #dc2626);
+  background: transparent; border-radius: 6px; padding: 4px 8px; font-size: 12px;
+  cursor: pointer; font-family: inherit;
+}
+.md-actions { display: flex; gap: 8px; margin-top: 4px; }
+.md-error { font-size: 12px; color: var(--danger, #dc2626); line-height: 1.6; }
+.md-ok { font-size: 12px; color: var(--primary-dark); }
+@media (max-width: 900px) {
+  .md-row { grid-template-columns: 1fr 1fr; }
+  .md-row .md-input { grid-column: auto; }
+}
 </style>

@@ -27,6 +27,12 @@ export interface LlmChatOptions {
   tools?: LlmToolDefinition[]
   temperature?: number
   maxTokens?: number
+  /** 按调用覆盖模型 id（不传则用 Config 默认） */
+  model?: string
+  /** 按调用覆盖 API 地址（OpenAI 兼容，不带 /chat/completions；不传则用 Config 默认） */
+  apiBase?: string
+  /** 按调用覆盖密钥（不传则用 Config 默认） */
+  apiKey?: string
 }
 
 export interface LlmResponse {
