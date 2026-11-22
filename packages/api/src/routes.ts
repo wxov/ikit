@@ -1205,17 +1205,57 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   app.get('/api/llm/models', (req, reply) =>
     requireUser(req, reply, async (user) => ctx.llmModels.listPublic(user.role)),
   )
-  // 站主保存整份清单（含默认模型）；校验失败 → 400 { error }
+  // 站主保存整份清单（供应商分组 + 默认模型）；校验失败 → 400 { error }
   app.put('/api/llm/models', (req, reply) =>
     requireAdmin(req, reply, async () => {
-      const body = req.body as { models?: unknown; defaultId?: string }
+      const body = req.body as { providers?: unknown; defaultKey?: string }
       try {
         return ctx.llmModels.save({
-          models: Array.isArray(body?.models) ? (body.models as any[]) : [],
-          defaultId: body?.defaultId ?? '',
+          providers: Array.isArray(body?.providers) ? (body.providers as any[]) : [],
+          defaultKey: body?.defaultKey ?? '',
         })
       } catch (e: any) {
         return reply.code(400).send({ error: e?.message ?? '模型配置保存失败' })
+      }
+    }),
+  )
+  // 一键获取模型列表（站主）：服务端代理请求该供应商的 GET {apiBase}/models
+  // body: { apiBase, apiKey?, providerId? }；apiKey 留空时用 providerId 已保存的密钥
+  app.post('/api/llm/models/fetch', (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      const body = req.body as { apiBase?: string; apiKey?: string; providerId?: string }
+      const stored = body?.providerId ? ctx.llmModels.keyOf(String(body.providerId)) : undefined
+      const apiBase = String(body?.apiBase || stored?.apiBase || '').trim().replace(/\/+$/, '')
+      const apiKey = String(body?.apiKey || '').trim() || stored?.apiKey || ''
+      if (!apiBase) return reply.code(400).send({ error: '请先填写 apiBase' })
+      try {
+        const u = new URL(apiBase)
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('bad protocol')
+      } catch {
+        return reply.code(400).send({ error: 'apiBase 不是合法的 http(s) 地址' })
+      }
+      try {
+        const res = await fetch(`${apiBase}/models`, {
+          headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!res.ok) {
+          const text = await res.text().catch(() => '')
+          return reply.code(400).send({ error: `获取模型列表失败（HTTP ${res.status}）：${text.slice(0, 200)}` })
+        }
+        const data = (await res.json()) as any
+        // OpenAI 兼容：{ data: [{ id }] }；也兼容 { models: [...] } / 纯数组
+        const rawList: any[] = Array.isArray(data?.data) ? data.data : Array.isArray(data?.models) ? data.models : Array.isArray(data) ? data : []
+        const models = rawList
+          .map((m) => ({
+            id: String(typeof m === 'string' ? m : (m?.id ?? m?.name ?? '')).trim(),
+            ownedBy: typeof m === 'object' ? (m?.owned_by ?? m?.ownedBy ?? '') : '',
+          }))
+          .filter((m) => m.id)
+          .map((m) => ({ id: m.id, name: m.id, ownedBy: m.ownedBy || undefined }))
+        return { models }
+      } catch (e: any) {
+        return reply.code(400).send({ error: `获取模型列表失败：${e?.message ?? e}` })
       }
     }),
   )

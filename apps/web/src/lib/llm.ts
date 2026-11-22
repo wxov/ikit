@@ -1,36 +1,56 @@
-// 「小知」模型清单 API（2026-11-22）
+// 「小知」模型清单 API（v2：按供应商分组，2026-11-22）
 // - GET  /api/llm/models：登录即可；站主拿全部，其他用户只拿「对普通用户可见」的模型
-// - PUT  /api/llm/models：仅站主，保存整份清单（含默认模型）
+// - PUT  /api/llm/models：仅站主，保存整份清单（供应商分组 + 默认模型）
+// - POST /api/llm/models/fetch：仅站主，服务端代理 GET {apiBase}/models 拉取模型列表
 // 注意：服务端响应永不含明文 apiKey，只返回 hasKey + keyMask 掩码。
 import { api } from './api'
 import { authHeaders } from './auth'
 
 export interface LlmModelPublic {
+  /** 全局 id：`${providerId}/${modelKey}` */
   id: string
+  providerId: string
+  providerName: string
   name: string
   model: string
-  apiBase?: string
+  apiBase: string
   visibleToUsers: boolean
-  order: number
-  /** 是否已配置独立密钥（未配置则回落到服务端 .env 的 LLM_API_KEY） */
+  /** 该供应商是否已配置密钥（未配置则回落到 .env 的 LLM_API_KEY） */
   hasKey: boolean
-  /** 密钥掩码，如 `sk-****abcd`；无密钥为空串 */
   keyMask: string
+  order: number
+}
+
+export interface LlmProviderPublic {
+  id: string
+  name: string
+  apiBase: string
+  hasKey: boolean
+  keyMask: string
+  order: number
+  models: LlmModelPublic[]
 }
 
 export interface LlmModelsPayload {
+  providers: LlmProviderPublic[]
   models: LlmModelPublic[]
   defaultId: string
 }
 
-/** 保存时的模型条目：apiKey 留空/不传 = 保留原值；null = 清除 */
 export interface LlmModelInput {
-  id: string
-  name: string
+  key?: string
+  name?: string
   model: string
-  apiBase?: string
-  apiKey?: string | null
   visibleToUsers?: boolean
+}
+
+export interface LlmProviderInput {
+  id?: string
+  name?: string
+  apiBase: string
+  /** undefined / '' = 保留原值；null = 清除 */
+  apiKey?: string | null
+  models: LlmModelInput[]
   order?: number
 }
 
@@ -39,12 +59,24 @@ export function listModels(): Promise<LlmModelsPayload> {
 }
 
 export function saveModels(payload: {
-  models: LlmModelInput[]
-  defaultId: string
+  providers: LlmProviderInput[]
+  defaultKey: string
 }): Promise<LlmModelsPayload> {
   return api<LlmModelsPayload>('/api/llm/models', {
     method: 'PUT',
     headers: authHeaders(),
     body: JSON.stringify(payload),
   })
+}
+
+/** 一键获取模型列表（站主）：apiKey 留空时用 providerId 已保存的密钥 */
+export function fetchModelList(payload: {
+  apiBase: string
+  apiKey?: string
+  providerId?: string
+}): Promise<{ models: Array<{ id: string; name: string; ownedBy?: string }> }> {
+  return api<{ models: Array<{ id: string; name: string; ownedBy?: string }> }>(
+    '/api/llm/models/fetch',
+    { method: 'POST', headers: authHeaders(), body: JSON.stringify(payload) },
+  )
 }

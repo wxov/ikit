@@ -6,7 +6,7 @@ import { apiUrl } from '../lib/config'
 import { authHeaders } from '../lib/auth'
 import type { PublicUser } from '../lib/auth'
 import { renderMarkdown } from '../lib/markdown'
-import { listModels, saveModels, type LlmModelPublic } from '../lib/llm'
+import { listModels, saveModels, fetchModelList, type LlmModelPublic, type LlmProviderPublic } from '../lib/llm'
 
 interface AgentSession {
   id: string
@@ -83,36 +83,64 @@ function syncModelFromSession() {
   selectedModel.value = cur && models.value.some((m) => m.id === cur) ? cur : defaultModelId.value
 }
 
-// ---- 模型配置（站主，在小知面板内）----
+// ---- 模型配置（站主，在小知面板内）：按「供应商」分组（参考 CC Switch）----
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
 
 interface ModelRow {
-  id: string
+  key: string
   name: string
   model: string
+  visibleToUsers: boolean
+}
+interface ProviderRow {
+  id: string
+  name: string
   apiBase: string
   apiKey: string
   keyMask: string
   hasKey: boolean
-  visibleToUsers: boolean
+  models: ModelRow[]
 }
+
 const configOpen = ref(false)
-const configRows = ref<ModelRow[]>([])
+const configProviders = ref<ProviderRow[]>([])
 const configDefaultId = ref('')
 const configLoading = ref(false)
 const configSaving = ref(false)
 const configNotice = ref('')
 
-function rowsFrom(list: LlmModelPublic[]): ModelRow[] {
-  return list.map((m) => ({
-    id: m.id,
-    name: m.name,
-    model: m.model,
-    apiBase: m.apiBase ?? '',
+// 「一键获取模型列表」弹层
+const fetchOpen = ref(false)
+const fetchProviderIdx = ref(-1)
+const fetchLoading = ref(false)
+const fetchError = ref('')
+const fetchManual = ref('')
+interface FetchRow {
+  id: string
+  name: string
+  exists: boolean
+  checked: boolean
+}
+const fetchList = ref<FetchRow[]>([])
+
+function compositeOf(p: ProviderRow, m: ModelRow): string {
+  return `${p.id || 'new'}/${m.key || m.model}`
+}
+
+function providersFrom(list: LlmProviderPublic[]): ProviderRow[] {
+  return list.map((p) => ({
+    id: p.id,
+    name: p.name,
+    apiBase: p.apiBase,
     apiKey: '',
-    keyMask: m.keyMask,
-    hasKey: m.hasKey,
-    visibleToUsers: m.visibleToUsers,
+    keyMask: p.keyMask,
+    hasKey: p.hasKey,
+    models: p.models.map((m) => ({
+      key: m.id.startsWith(p.id + '/') ? m.id.slice(p.id.length + 1) : m.id,
+      name: m.name,
+      model: m.model,
+      visibleToUsers: m.visibleToUsers,
+    })),
   }))
 }
 
@@ -124,8 +152,8 @@ async function openModelConfig() {
   modelsError.value = ''
   try {
     const r = await listModels()
-    configRows.value = rowsFrom(r.models)
-    configDefaultId.value = r.defaultId || r.models[0]?.id || ''
+    configProviders.value = providersFrom(r.providers)
+    configDefaultId.value = r.defaultId || ''
   } catch (e: any) {
     modelsError.value = e?.message ?? String(e)
   } finally {
@@ -133,34 +161,122 @@ async function openModelConfig() {
   }
 }
 
-function addConfigRow() {
-  configRows.value.push({ id: '', name: '', model: '', apiBase: '', apiKey: '', keyMask: '', hasKey: false, visibleToUsers: true })
+function addProvider() {
+  configProviders.value.push({
+    id: '',
+    name: '',
+    apiBase: '',
+    apiKey: '',
+    keyMask: '',
+    hasKey: false,
+    models: [{ key: '', name: '', model: '', visibleToUsers: true }],
+  })
 }
 
-function removeConfigRow(i: number) {
-  configRows.value.splice(i, 1)
-  if (!configRows.value.some((r) => r.id === configDefaultId.value)) configDefaultId.value = configRows.value[0]?.id ?? ''
+function removeProvider(i: number) {
+  configProviders.value.splice(i, 1)
+  const flat = configProviders.value.flatMap((p) => p.models.map((m) => compositeOf(p, m)))
+  if (!flat.includes(configDefaultId.value)) configDefaultId.value = flat[0] ?? ''
+}
+
+function addModel(pi: number) {
+  configProviders.value[pi].models.push({ key: '', name: '', model: '', visibleToUsers: true })
+}
+
+function removeModel(pi: number, mi: number) {
+  const p = configProviders.value[pi]
+  const removed = compositeOf(p, p.models[mi])
+  p.models.splice(mi, 1)
+  if (configDefaultId.value === removed) {
+    const flat = configProviders.value.flatMap((x) => x.models.map((m) => compositeOf(x, m)))
+    configDefaultId.value = flat[0] ?? ''
+  }
+}
+
+/** 打开「一键获取模型列表」 */
+function openFetch(pi: number) {
+  fetchProviderIdx.value = pi
+  fetchOpen.value = true
+  fetchError.value = ''
+  fetchManual.value = ''
+  fetchList.value = []
+}
+
+/** 调用后端代理 GET {apiBase}/models（用该供应商填写的密钥，或已保存的密钥） */
+async function doFetch() {
+  const p = configProviders.value[fetchProviderIdx.value]
+  if (!p) return
+  fetchLoading.value = true
+  fetchError.value = ''
+  try {
+    const r = await fetchModelList({
+      apiBase: p.apiBase.trim(),
+      apiKey: p.apiKey.trim() || undefined,
+      providerId: p.id || undefined,
+    })
+    fetchList.value = r.models.map((m) => {
+      const exists = p.models.some((x) => x.model === m.id)
+      return { id: m.id, name: m.name || m.id, exists, checked: !exists }
+    })
+    if (!fetchList.value.length) fetchError.value = '该供应商未返回任何模型'
+  } catch (e: any) {
+    fetchError.value = e?.message ?? String(e)
+  } finally {
+    fetchLoading.value = false
+  }
+}
+
+function toggleAllFetch(v: boolean) {
+  fetchList.value = fetchList.value.map((x) => ({ ...x, checked: v }))
+}
+
+/** 把勾选的模型 / 手动输入的模型 id 加入该供应商 */
+function applyFetch() {
+  const p = configProviders.value[fetchProviderIdx.value]
+  if (!p) return
+  const add: ModelRow[] = []
+  for (const f of fetchList.value) {
+    if (f.checked && !p.models.some((x) => x.model === f.id) && !add.some((x) => x.model === f.id)) {
+      add.push({ key: '', name: f.id, model: f.id, visibleToUsers: true })
+    }
+  }
+  const manual = fetchManual.value
+    .split(/[\s,，、]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  for (const id of manual) {
+    if (!p.models.some((x) => x.model === id) && !add.some((x) => x.model === id)) {
+      add.push({ key: '', name: id, model: id, visibleToUsers: true })
+    }
+  }
+  p.models.push(...add)
+  fetchOpen.value = false
 }
 
 async function saveModelConfig() {
+  const flat = configProviders.value.flatMap((p) => p.models.map((m) => compositeOf(p, m)))
+  const defaultKey = flat.includes(configDefaultId.value) ? configDefaultId.value : (flat[0] ?? '')
   configSaving.value = true
   configNotice.value = ''
   modelsError.value = ''
   try {
     const r = await saveModels({
-      models: configRows.value.map((row, i) => ({
-        id: row.id,
-        name: row.name.trim(),
-        model: row.model.trim(),
-        apiBase: row.apiBase.trim() || undefined,
-        // 留空 = 保留原密钥（服务端语义）；输入即更新
-        apiKey: row.apiKey.trim() ? row.apiKey.trim() : undefined,
-        visibleToUsers: row.visibleToUsers,
+      providers: configProviders.value.map((p, i) => ({
+        id: p.id,
+        name: p.name.trim() || undefined,
+        apiBase: p.apiBase.trim(),
+        apiKey: p.apiKey.trim() ? p.apiKey.trim() : undefined,
+        models: p.models.map((m) => ({
+          key: m.key,
+          name: m.name.trim() || m.model.trim(),
+          model: m.model.trim(),
+          visibleToUsers: m.visibleToUsers,
+        })),
         order: i,
       })),
-      defaultId: configDefaultId.value,
+      defaultKey,
     })
-    configRows.value = rowsFrom(r.models)
+    configProviders.value = providersFrom(r.providers)
     configDefaultId.value = r.defaultId
     configNotice.value = '已保存'
     await loadModels()
@@ -171,7 +287,6 @@ async function saveModelConfig() {
     configSaving.value = false
   }
 }
-
 function stop() {
   abortController?.abort()
   loading.value = false
@@ -417,7 +532,7 @@ onMounted(async () => {
       <div v-if="loggedIn" class="model-pick" :title="modelsError || '选择本会话使用的模型'">
         <label>模型</label>
         <select v-model="selectedModel" :disabled="!models.length">
-          <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name }}</option>
+          <option v-for="m in models" :key="m.id" :value="m.id">{{ m.providerName }} · {{ m.name }}</option>
         </select>
         <span v-if="!models.length" class="model-hint">未配置模型</span>
         <button v-if="isAdmin" class="model-cfg-btn" title="模型配置（增删改模型 / 默认 / 可见性）" @click="openModelConfig">
@@ -539,35 +654,53 @@ onMounted(async () => {
       <button v-else class="btn danger" @click="stop">停止</button>
     </div>
 
-    <!-- 模型配置（站主，小知面板内）：Teleport 到 body，避免被面板高度/滚动裁剪 -->
+    <!-- 模型配置（站主，小知面板内）：按供应商分组（参考 CC Switch）；Teleport 到 body 避免被面板裁剪 -->
     <Teleport to="body">
       <div v-if="configOpen" class="mc-overlay" @click.self="configSaving ? undefined : (configOpen = false)">
         <div class="mc-modal">
           <h3>⚙ 模型配置</h3>
           <p class="mc-hint">
-            密钥<b>只保存在服务端</b>，这里只显示掩码；<b>留空表示不修改</b>已有密钥。未单独配置密钥的模型会回落到
-            服务端 <code>.env</code> 的 <code>LLM_API_KEY</code>。
+            按<b>供应商</b>分组：第一行填连接信息（名称 / apiBase / API Key），第二行管理该供应商下的模型；
+            「⇩ 获取模型列表」会请求 <code>{apiBase}/models</code>，勾选后加入。密钥只保存在服务端，这里只显示掩码；
+            <b>留空表示不修改</b>。
           </p>
           <div v-if="configLoading" class="mc-hint">加载中…</div>
-          <div v-else class="mc-list">
-            <div v-for="(m, i) in configRows" :key="i" class="mc-row">
-              <label class="mc-def" :title="m.id ? '设为默认模型' : '新模型保存后才能设为默认'">
-                <input type="radio" :checked="configDefaultId === m.id" :disabled="!m.id" @change="configDefaultId = m.id" /> 默认
-              </label>
-              <input v-model="m.name" class="mc-input" placeholder="显示名（如 DeepSeek Chat）" />
-              <input v-model="m.model" class="mc-input" placeholder="模型 id（如 deepseek-chat）" />
-              <input v-model="m.apiBase" class="mc-input" placeholder="apiBase（可选，默认用服务端配置）" />
-              <input
-                v-model="m.apiKey"
-                class="mc-input"
-                type="password"
-                :placeholder="m.hasKey ? '已保存 ' + m.keyMask + '，留空不修改' : 'API Key（可选）'"
-              />
-              <label class="mc-chk"><input type="checkbox" v-model="m.visibleToUsers" /> 对普通用户可见</label>
-              <button class="mc-del" title="删除该模型" @click="removeConfigRow(i)">删除</button>
+          <div v-else class="mc-providers">
+            <div v-for="(p, pi) in configProviders" :key="pi" class="mc-provider">
+              <div class="mc-provider-top">
+                <input v-model="p.name" class="mc-input mc-pname" placeholder="供应商名（如 DeepSeek）" />
+                <input v-model="p.apiBase" class="mc-input" placeholder="apiBase（如 https://api.deepseek.com）" />
+                <input
+                  v-model="p.apiKey"
+                  class="mc-input"
+                  type="password"
+                  :placeholder="p.hasKey ? '已保存 ' + p.keyMask + '，留空不修改' : 'API Key'"
+                />
+                <button class="mc-btn" :disabled="fetchLoading" @click="openFetch(pi)">⇩ 获取模型列表</button>
+                <button class="mc-del" @click="removeProvider(pi)">删除供应商</button>
+              </div>
+              <div class="mc-models">
+                <div v-for="(m, mi) in p.models" :key="mi" class="mc-model">
+                  <label class="mc-def">
+                    <input
+                      type="radio"
+                      :checked="configDefaultId === compositeOf(p, m)"
+                      @change="configDefaultId = compositeOf(p, m)"
+                    />
+                    默认
+                  </label>
+                  <input v-model="m.name" class="mc-input" placeholder="显示名（如 DeepSeek Chat）" />
+                  <input v-model="m.model" class="mc-input" placeholder="模型 id（如 deepseek-chat）" />
+                  <label class="mc-chk"><input type="checkbox" v-model="m.visibleToUsers" /> 对普通用户可见</label>
+                  <button class="mc-del" @click="removeModel(pi, mi)">删除</button>
+                </div>
+                <div class="mc-actions">
+                  <button class="mc-btn" @click="addModel(pi)">＋ 手动添加模型</button>
+                </div>
+              </div>
             </div>
-            <div class="mc-actions">
-              <button class="mc-btn" @click="addConfigRow">＋ 添加模型</button>
+            <div class="mc-actions mc-footer">
+              <button class="mc-btn" @click="addProvider">＋ 添加供应商</button>
               <button class="mc-btn primary" :disabled="configSaving" @click="saveModelConfig">
                 {{ configSaving ? '保存中…' : '保存' }}
               </button>
@@ -575,6 +708,43 @@ onMounted(async () => {
             </div>
             <div v-if="modelsError" class="mc-error">❌ {{ modelsError }}</div>
             <div v-if="configNotice" class="mc-ok">✅ {{ configNotice }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 一键获取模型列表（拉回后勾选加入；也可手动输入 id 兜底） -->
+      <div v-if="fetchOpen" class="mc-overlay" @click.self="fetchOpen = false">
+        <div class="mc-fetch">
+          <h3>⇩ 获取模型列表</h3>
+          <p class="mc-hint">
+            {{ configProviders[fetchProviderIdx]?.name || '供应商' }} · {{ configProviders[fetchProviderIdx]?.apiBase }}
+          </p>
+          <div class="mc-actions" style="margin-bottom: 8px">
+            <button class="mc-btn" :disabled="fetchLoading" @click="doFetch">
+              {{ fetchLoading ? '获取中…' : '开始获取' }}
+            </button>
+            <button class="mc-btn" @click="toggleAllFetch(true)">全选</button>
+            <button class="mc-btn" @click="toggleAllFetch(false)">全不选</button>
+          </div>
+          <div v-if="fetchError" class="mc-error">❌ {{ fetchError }}</div>
+          <div v-if="fetchList.length" class="mc-fetch-list">
+            <label v-for="f in fetchList" :key="f.id" class="mc-fetch-item" :class="{ exists: f.exists }">
+              <input type="checkbox" v-model="f.checked" :disabled="f.exists" />
+              <span class="mc-fetch-id">{{ f.id }}</span>
+              <span v-if="f.exists" class="mc-fetch-tag">已存在</span>
+            </label>
+          </div>
+          <div class="mc-actions" style="margin-top: 8px">
+            <input
+              v-model="fetchManual"
+              class="mc-input"
+              style="flex: 1"
+              placeholder="可手动输入模型 id（逗号 / 空格分隔）"
+            />
+          </div>
+          <div class="mc-actions">
+            <button class="mc-btn primary" @click="applyFetch">加入所选</button>
+            <button class="mc-btn" @click="fetchOpen = false">取消</button>
           </div>
         </div>
       </div>
@@ -970,4 +1140,43 @@ onMounted(async () => {
 .mc-error { font-size: 12px; color: var(--danger, #dc2626); }
 .mc-ok { font-size: 12px; color: var(--primary-dark); }
 @media (max-width: 900px) { .mc-row { grid-template-columns: 1fr 1fr; } }
+
+/* 供应商卡片（模型配置 v2） */
+.mc-providers { display: flex; flex-direction: column; gap: 10px; }
+.mc-provider { border: 1px solid var(--border); border-radius: 12px; padding: 10px; background: var(--panel); }
+.mc-provider-top {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1.4fr) minmax(0, 1.2fr) auto auto;
+  gap: 6px; align-items: center;
+}
+.mc-pname { font-weight: 600; }
+.mc-models { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.mc-model {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) minmax(0, 1fr) auto auto;
+  gap: 6px; align-items: center;
+  padding: 6px 0 0;
+  border-top: 1px dashed var(--border);
+}
+.mc-model:first-child { border-top: none; padding-top: 0; }
+.mc-footer { margin-top: 4px; }
+.mc-fetch {
+  width: min(560px, 94vw); max-height: 84vh; overflow: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 20px;
+}
+.mc-fetch h3 { margin: 0 0 6px; font-size: 16px; }
+.mc-fetch-list {
+  max-height: 46vh; overflow: auto;
+  display: flex; flex-direction: column; gap: 2px;
+  border: 1px solid var(--border); border-radius: 10px; padding: 6px;
+}
+.mc-fetch-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.mc-fetch-item:hover { background: var(--primary-soft); }
+.mc-fetch-item.exists { opacity: 0.55; cursor: default; }
+.mc-fetch-id { overflow-wrap: anywhere; }
+.mc-fetch-tag { font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
+@media (max-width: 900px) {
+  .mc-provider-top { grid-template-columns: 1fr 1fr; }
+  .mc-model { grid-template-columns: 1fr 1fr; }
+}
 </style>
