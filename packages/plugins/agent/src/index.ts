@@ -22,19 +22,22 @@ export interface Config {
   systemPrompt?: string
   maxSteps?: number
   knowledgeTopK?: number
-  /** 是否启用写类工具（knowledge_add 等），默认关闭 */
+  /** 是否启用写类工具（knowledge_add / knowledge_update），默认开启（仅站主可用 + 每次需确认） */
   enableWriteTools?: boolean
+  /** 写操作等待用户确认的超时（毫秒），超时自动拒绝 */
+  approvalTimeoutMs?: number
 }
 
 export const Config: Schema<Config> = Schema.object({
   dataDir: Schema.string().default('./data'),
   filename: Schema.string().default('agent.json'),
   systemPrompt: Schema.string().default(
-    '你是「小知」（英文名 DocCurator），i-kit 知识库的文档管理员：负责整理、归类、检索与维护知识库文档。当用户的问题涉及需要查询的事实、资料或文档时，优先调用 knowledge_search 工具检索知识库；如果知识库中没有相关内容，再基于自身知识回答。',
+    '你是「小知」（英文名 DocCurator），i-kit 知识库的文档管理员：负责整理、归类、检索与维护知识库文档。当用户的问题涉及需要查询的事实、资料或文档时，优先调用 knowledge_search 工具检索知识库；如果知识库中没有相关内容，再基于自身知识回答。若用户要求新增或修改文档，调用 knowledge_add / knowledge_update（执行前系统会请用户确认，确认后才会真正写入）。',
   ),
   maxSteps: Schema.number().default(10),
   knowledgeTopK: Schema.number().default(3),
-  enableWriteTools: Schema.boolean().default(false),
+  enableWriteTools: Schema.boolean().default(true),
+  approvalTimeoutMs: Schema.number().default(120000),
 })
 
 /** account 可选依赖的最小结构面（避免硬依赖 @ikit/plugin-account 的完整类型） */
@@ -138,32 +141,165 @@ export function apply(_ctx: Context, config: Config) {
     },
   })
 
-  // 内置工具：写入知识库（写类工具，需 enableWriteTools 开启）
+  // ---- 写类工具（2026-11-22）：新增 / 修改文档；仅站主可用，且每次执行前需用户确认 ----
+  const approvals = new Map<string, (ok: boolean) => void>()
+
+  /** 等待用户确认；超时自动拒绝 */
+  function waitApproval(callId: string, timeoutMs: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        approvals.delete(callId)
+        resolve(false)
+      }, Math.max(1000, timeoutMs))
+      approvals.set(callId, (ok) => {
+        clearTimeout(timer)
+        approvals.delete(callId)
+        resolve(ok)
+      })
+    })
+  }
+
+  function resolveApproval(callId: string, approved: boolean): boolean {
+    const fn = approvals.get(callId)
+    if (!fn) return false
+    fn(approved)
+    return true
+  }
+
+  function approvalSummary(tool: string, args: Record<string, unknown>): string {
+    const title = String(args.title ?? args.matchTitle ?? args.id ?? '').trim()
+    if (tool === 'knowledge_add') return `新增文档《${title || '未命名'}》`
+    if (tool === 'knowledge_update') return `修改文档「${title || '（未指定）'}」`
+    return tool
+  }
+
   if (config.enableWriteTools) {
     registerTool({
       name: 'knowledge_add',
-      description: '向知识库新增一条知识条目（标题 + Markdown 正文，可选分类）。',
+      description:
+        '向知识库新增一篇文档（标题 + Markdown 正文；可选分类/父文档/标签/可见性/发布状态）。属于写操作：仅站主可用，且执行前需用户确认。',
       parameters: {
         type: 'object',
         properties: {
-          title: { type: 'string', description: '条目标题' },
+          title: { type: 'string', description: '文档标题' },
           content: { type: 'string', description: '正文（Markdown）' },
-          category: { type: 'string', description: '分类路径，可选' },
+          category: { type: 'string', description: '分类路径，如 技术/前端（可选）' },
+          parentId: { type: 'string', description: '父文档 id（可选，缺省为顶层）' },
+          tags: { type: 'array', items: { type: 'string' }, description: '标签（可选）' },
+          visibility: {
+            type: 'string',
+            enum: ['public', 'login', 'private'],
+            description: '可见性（可选，缺省 public）',
+          },
+          status: {
+            type: 'string',
+            enum: ['draft', 'published'],
+            description: '状态（可选，缺省 draft；published 表示发布后游客可见）',
+          },
         },
         required: ['title', 'content'],
       },
+      requiresApproval: true,
       handler: async (args, call) => {
+        if (call?.role !== 'admin') return '错误：仅站主可使用写文档技能（新增/修改）。'
         const title = String(args.title ?? '').trim()
         const content = String(args.content ?? '').trim()
         if (!title || !content) return '标题与正文不能为空'
-        // 审计铺路：记录写入发起者（写权限模型本期不变，见方案 Q5）
+        const status = args.status === 'published' ? 'published' : 'draft'
+        const visibility =
+          args.visibility === 'login' || args.visibility === 'private' || args.visibility === 'public'
+            ? (args.visibility as 'public' | 'login' | 'private')
+            : undefined
+        const tags = Array.isArray(args.tags) ? args.tags.map((t) => String(t).trim()).filter(Boolean) : undefined
         console.log(`[agent] knowledge_add by user ${call?.userId ?? '(unknown)'}`)
         const entry = await ctx.knowledge.create({
           title,
           content,
           category: args.category ? String(args.category) : undefined,
-        })
-        return `已新增知识条目：${entry.title}`
+          parentId: args.parentId ? String(args.parentId) : undefined,
+          tags,
+          visibility,
+          status,
+        } as any)
+        return `已新增文档「${entry.title}」（id=${entry.id}，状态=${entry.status ?? 'draft'}）`
+      },
+    })
+
+    registerTool({
+      name: 'knowledge_update',
+      description:
+        '修改知识库中的一篇文档：可按 id 或标题匹配目标，改标题/正文（替换或追加）/分类/标签/可见性/发布状态。属于写操作：仅站主可用，且执行前需用户确认；不支持移动、删除。',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: '目标文档 id（可选；与 matchTitle 二选一）' },
+          matchTitle: { type: 'string', description: '目标文档标题（可选；按标题精确/包含匹配）' },
+          title: { type: 'string', description: '新的标题（可选）' },
+          content: { type: 'string', description: '正文内容（配合 mode 使用）' },
+          mode: {
+            type: 'string',
+            enum: ['replace', 'append'],
+            description: '正文处理方式：replace=整篇替换（默认），append=在原文末尾追加',
+          },
+          category: { type: 'string', description: '新的分类路径（可选）' },
+          tags: { type: 'array', items: { type: 'string' }, description: '新的标签（可选，整体替换）' },
+          visibility: {
+            type: 'string',
+            enum: ['public', 'login', 'private'],
+            description: '新的可见性（可选）',
+          },
+          status: {
+            type: 'string',
+            enum: ['draft', 'published'],
+            description: '新的状态（可选；published 需标题与正文均非空）',
+          },
+        },
+      },
+      requiresApproval: true,
+      handler: async (args, call) => {
+        if (call?.role !== 'admin') return '错误：仅站主可使用写文档技能（新增/修改）。'
+        const adminViewer: Viewer = { groups: ['admin'], isAdmin: true }
+        // 定位目标
+        let target: { id: string; title: string; content: string } | undefined
+        const id = String(args.id ?? '').trim()
+        const matchTitle = String(args.matchTitle ?? '').trim()
+        if (id) {
+          const e = await ctx.knowledge.view(id, adminViewer)
+          if (e) target = { id: e.id, title: e.title, content: e.content ?? '' }
+        } else if (matchTitle) {
+          const all = await ctx.knowledge.list({ limit: 1000 }, adminViewer)
+          const exact = all.find((e) => e.title === matchTitle)
+          const fuzzy = exact ?? all.find((e) => e.title.includes(matchTitle))
+          if (fuzzy) target = { id: fuzzy.id, title: fuzzy.title, content: fuzzy.content ?? '' }
+        }
+        if (!target) return '未找到要修改的文档：请提供准确的 id 或标题（可先用 knowledge_search 检索）。'
+
+        const mode = args.mode === 'append' ? 'append' : 'replace'
+        const patch: Record<string, unknown> = {}
+        if (args.title !== undefined && String(args.title).trim()) patch.title = String(args.title).trim()
+        if (args.content !== undefined && String(args.content).trim()) {
+          patch.content =
+            mode === 'append' ? `${target.content}\n\n${String(args.content).trim()}` : String(args.content).trim()
+        }
+        if (args.category !== undefined) patch.category = String(args.category).trim() || undefined
+        if (Array.isArray(args.tags)) patch.tags = args.tags.map((t) => String(t).trim()).filter(Boolean)
+        if (args.visibility === 'public' || args.visibility === 'login' || args.visibility === 'private') {
+          patch.visibility = args.visibility
+        }
+        if (args.status === 'draft' || args.status === 'published') {
+          const nextTitle = typeof patch.title === 'string' ? patch.title : target.title
+          const nextContent = typeof patch.content === 'string' ? patch.content : target.content
+          if (args.status === 'published' && (!nextTitle.trim() || !nextContent.trim())) {
+            return '发布前需要标题与正文均非空（可先补全内容再发布）。'
+          }
+          patch.status = args.status
+        }
+        if (!Object.keys(patch).length) return '没有可修改的字段（请提供 title/content/category/tags/visibility/status 之一）。'
+        console.log(`[agent] knowledge_update by user ${call?.userId ?? '(unknown)'} -> ${target.id}`)
+        const updated = await ctx.knowledge.update(target.id, patch as any)
+        if (!updated) return '修改失败：目标文档不存在或已删除。'
+        const fields = Object.keys(patch).join('/')
+        return `已修改文档「${updated.title}」（字段：${fields}）`
       },
     })
   }
@@ -244,6 +380,31 @@ export function apply(_ctx: Context, config: Config) {
         let toolResult: string
         if (!tool) {
           toolResult = `错误：未知工具 ${toolName}`
+        } else if (tool.requiresApproval) {
+          // 写类工具：仅站主可用，且执行前挂起等待用户确认（SSE approval 事件 → 审批接口）
+          if (call?.role !== 'admin') {
+            toolResult = '错误：仅站主可使用写文档技能（新增/修改）。'
+          } else {
+            const callId = toolCall.id || `call-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+            const pending = waitApproval(callId, config.approvalTimeoutMs ?? 120000)
+            yield {
+              type: 'approval',
+              callId,
+              tool: toolName,
+              args: toolArgs,
+              summary: approvalSummary(toolName, toolArgs),
+            }
+            const approved = await pending
+            if (!approved) {
+              toolResult = '用户已拒绝该操作，未写入任何内容。'
+            } else {
+              try {
+                toolResult = String(await tool.handler(toolArgs, call))
+              } catch (e) {
+                toolResult = `工具执行出错：${e instanceof Error ? e.message : String(e)}`
+              }
+            }
+          }
         } else {
           try {
             toolResult = String(await tool.handler(toolArgs, call))
@@ -507,6 +668,7 @@ export function apply(_ctx: Context, config: Config) {
       }))
     },
     runTool,
+    resolveApproval,
     runStream,
     listSessions,
     createSession,

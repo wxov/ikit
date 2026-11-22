@@ -25,10 +25,20 @@ interface AgentMessage {
   steps?: Array<{ toolName: string; toolArgs: Record<string, unknown>; toolResult: string }>
   createdAt: string
 }
+interface ApprovalInfo {
+  callId: string
+  tool: string
+  summary: string
+  args: Record<string, unknown>
+  state: 'pending' | 'approved' | 'denied' | 'error'
+  message?: string
+}
 interface ChatItem {
   role: 'user' | 'assistant'
   content: string
   steps?: Array<{ toolName: string; toolArgs: Record<string, unknown>; toolResult: string }>
+  /** 写类工具待确认卡片（新增/修改文档） */
+  approval?: ApprovalInfo
 }
 
 const currentUser = inject<Ref<PublicUser | null>>('currentUser', ref(null))
@@ -491,6 +501,23 @@ async function send() {
           scrollToBottom()
         } else if (ev.type === 'status') {
           statusText.value = ev.status
+        } else if (ev.type === 'approval') {
+          // 写操作需用户确认：插到当前流式回答之前，展示确认卡片
+          const item: ChatItem = {
+            role: 'assistant',
+            content: '',
+            approval: {
+              callId: String(ev.callId ?? ''),
+              tool: String(ev.tool ?? ''),
+              summary: String(ev.summary ?? ev.tool ?? '写操作'),
+              args: (ev.args ?? {}) as Record<string, unknown>,
+              state: 'pending',
+            },
+          }
+          const idx = messages.value.indexOf(assistant)
+          messages.value.splice(idx >= 0 ? idx : messages.value.length, 0, item)
+          statusText.value = '等待你确认写操作…'
+          scrollToBottom()
         } else if (ev.type === 'error') {
           error.value = ev.error
         }
@@ -510,6 +537,34 @@ function scrollToBottom() {
   nextTick(() => {
     chatEl.value?.scrollTo({ top: chatEl.value.scrollHeight, behavior: 'smooth' })
   })
+}
+
+/** 写操作确认卡片：参数预览（超长截断） */
+function approvalArgsText(args: Record<string, unknown>): string {
+  let s = ''
+  try {
+    s = JSON.stringify(args, null, 2)
+  } catch {
+    s = String(args)
+  }
+  return s.length > 1200 ? `${s.slice(0, 1200)}\n…（已截断）` : s
+}
+
+/** 允许 / 拒绝一次写操作（服务端据此继续或取消该工具调用） */
+async function respondApproval(item: ChatItem, approved: boolean) {
+  const a = item.approval
+  if (!a || a.state !== 'pending' || !currentId.value) return
+  a.state = approved ? 'approved' : 'denied'
+  try {
+    await api(`/api/agent/sessions/${currentId.value}/approvals/${a.callId}`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ approved }),
+    })
+  } catch (e: any) {
+    a.state = 'error'
+    a.message = e?.message ?? String(e)
+  }
 }
 
 onMounted(async () => {
@@ -625,6 +680,20 @@ onMounted(async () => {
         :class="[m.role, { streaming: m.role === 'assistant' && loading && i === messages.length - 1 }]"
       >
         <div class="msg-head">{{ m.role === 'user' ? '你' : '小知' }}</div>
+
+        <!-- 写操作确认卡片（新增/修改文档需用户允许后才执行） -->
+        <div v-if="m.approval" class="approval-card" :class="m.approval.state">
+          <div class="ap-head">🔐 需要确认：{{ m.approval.summary }}</div>
+          <div class="ap-tool">工具：<code>{{ m.approval.tool }}</code></div>
+          <pre class="ap-args">{{ approvalArgsText(m.approval.args) }}</pre>
+          <div v-if="m.approval.state === 'pending'" class="ap-actions">
+            <button class="btn" @click="respondApproval(m, true)">允许并执行</button>
+            <button class="btn danger" @click="respondApproval(m, false)">拒绝</button>
+          </div>
+          <div v-else class="ap-state">
+            {{ m.approval.state === 'approved' ? '✅ 已允许，执行中…' : m.approval.state === 'denied' ? '🚫 已拒绝，未写入' : '⚠️ ' + (m.approval.message || '提交失败') }}
+          </div>
+        </div>
 
         <div v-if="m.steps && m.steps.length" class="steps">
           <div v-for="(s, j) in m.steps" :key="j" class="step">
@@ -1179,4 +1248,26 @@ onMounted(async () => {
   .mc-provider-top { grid-template-columns: 1fr 1fr; }
   .mc-model { grid-template-columns: 1fr 1fr; }
 }
+
+/* 写操作确认卡片（新增/修改文档） */
+.approval-card {
+  border: 1px solid var(--primary);
+  background: var(--primary-soft);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 6px 0 10px;
+  max-width: 100%;
+}
+.approval-card.denied { border-color: var(--border); background: var(--panel); opacity: 0.9; }
+.approval-card.approved { border-color: var(--border); background: var(--panel); }
+.approval-card.error { border-color: var(--danger, #dc2626); }
+.ap-head { font-size: 13px; font-weight: 600; color: var(--text); }
+.ap-tool { font-size: 12px; color: var(--muted); margin: 2px 0 6px; }
+.ap-args {
+  margin: 0 0 8px; padding: 8px 10px; max-height: 200px; overflow: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+}
+.ap-actions { display: flex; gap: 8px; }
+.ap-state { font-size: 12px; color: var(--muted); }
 </style>

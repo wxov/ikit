@@ -115,6 +115,8 @@ pnpm dev:web
 
 打开 http://localhost:5173 即可看到控制台：系统状态、小知（DocCurator）对话（流式）、知识库管理。
 
+> **小知可新增/修改文档**（站主专属）：在对话里让它「新建一篇关于 X 的文档」或「把《Y》的正文追加一段」，执行前会在对话中弹出**确认卡片**（参数预览 + 允许/拒绝），确认后才写入；拒绝或 120s 超时不会写入任何内容。knowledge_update 支持改标题/正文（替换或追加）/分类/标签/可见性/发布状态，不含移动/删除。
+
 > 小知支持**多模型（按供应商分组）**：站主在小知面板顶部「⚙ 配置」中按供应商填写 apiBase / API Key，点「⇩ 获取模型列表」即可拉取该供应商可用模型并勾选加入（也可手动填写模型 id），再设默认；小知面板顶部可切换模型（**按会话记忆**）。密钥仅存服务端，界面只显示掩码。
 
 ### 生产模式（同源部署）
@@ -377,6 +379,7 @@ node scripts/sign-plugin.mjs --zip tmp/hello-signed.zip --print-hash
 | DELETE | `/api/agent/sessions/:id` | 删除会话（登录/归属） |
 | GET | `/api/agent/sessions/:id/messages` | 会话消息（登录/归属） |
 | POST | `/api/agent/sessions/:id/chat-stream` | 会话内流式对话（SSE，登录/归属） |
+| POST | `/api/agent/sessions/:id/approvals/:callId` | 写操作审批（登录/归属）：`{approved:boolean}`，决定小知的新增/修改是否执行 |
 | GET | `/api/llm/models` | 模型清单（登录；站主全部、其他用户仅「对普通用户可见」，密钥只返回掩码） |
 | PUT | `/api/llm/models` | 保存模型清单 + 默认模型（站主） |
 | POST | `/api/llm/models/fetch` | 一键获取模型列表（站主）：服务端代理 `GET {apiBase}/models`，返回模型 id 列表 |

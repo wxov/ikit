@@ -86,6 +86,8 @@ async function main() {
     },
     agent: {
       dataDir: './data',
+      // 写类工具（新增/修改文档）等待确认的超时；测试时可用环境变量缩短
+      approvalTimeoutMs: Number(process.env.AGENT_APPROVAL_TIMEOUT_MS ?? '120000'),
     },
     llm: {
       apiBase: process.env.LLM_API_BASE ?? 'https://api.deepseek.com',

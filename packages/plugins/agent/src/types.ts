@@ -10,12 +10,16 @@ export interface AgentCallContext {
   viewer?: Viewer
   /** 调用者用户 id（供工具做归属判定/审计） */
   userId?: string
+  /** 调用者角色（写类工具据此鉴权：仅站主可用；缺省按普通用户处理） */
+  role?: 'user' | 'admin'
 }
 
 export interface AgentTool {
   name: string
   description: string
   parameters: Record<string, unknown>
+  /** 写类工具：执行前需用户确认（SSE 发 approval 事件，等待审批接口裁决） */
+  requiresApproval?: boolean
   /** 第二参可选：旧的单参签名 `(args) => ...` 仍然合法（call 被忽略） */
   handler: (
     args: Record<string, unknown>,
@@ -46,6 +50,8 @@ export type AgentStreamEvent =
   | { type: 'tool'; toolName: string; toolArgs: Record<string, unknown>; toolResult: string }
   | { type: 'delta'; content: string }
   | { type: 'status'; status: string }
+  /** 写类工具等待用户确认：前端应展示确认卡片，并 POST 审批接口 */
+  | { type: 'approval'; callId: string; tool: string; args: Record<string, unknown>; summary?: string }
   | { type: 'done' }
 
 /** 会话（持久化） */
@@ -123,6 +129,8 @@ export interface AgentService {
   registerTool(tool: AgentTool): () => void
   listTools(): AgentToolInfo[]
   runTool(name: string, args: Record<string, unknown>, call?: AgentCallContext): Promise<string>
+  /** 审批一个等待确认的写操作（callId 来自 SSE 的 approval 事件）；返回是否命中待审批项 */
+  resolveApproval(callId: string, approved: boolean): boolean
   runStream(
     userMessage: string,
     history?: ChatMessage[],

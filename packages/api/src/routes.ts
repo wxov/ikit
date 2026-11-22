@@ -122,7 +122,12 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
 
   // user → Agent 调用上下文（完善④）：viewer 由「调用者」解析，与 HTTP 知识库接口同源
   async function callOf(user: any) {
-    return { viewer: await viewerOf(user), userId: user?.id as string | undefined }
+    return {
+      viewer: await viewerOf(user),
+      userId: user?.id as string | undefined,
+      // 写类工具（knowledge_add/knowledge_update）据此鉴权：仅站主可用
+      role: (user?.role === 'admin' ? 'admin' : 'user') as 'user' | 'admin',
+    }
   }
 
   /**
@@ -1163,6 +1168,19 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
         )
       }
       raw.end()
+    }),
+  )
+
+  // Agent 写操作审批（2026-11-22）：SSE 收到 approval 事件后，前端 POST 此接口决定允许/拒绝
+  app.post('/api/agent/sessions/:id/approvals/:callId', (req, reply) =>
+    requireUser(req, reply, async (user) => {
+      const { id, callId } = req.params as { id: string; callId: string }
+      const session = await ctx.agent.getSession(user.id, id)
+      if (!session) return reply.code(404).send({ error: '会话不存在' })
+      const body = req.body as { approved?: boolean }
+      const ok = ctx.agent.resolveApproval(callId, !!body?.approved)
+      if (!ok) return reply.code(404).send({ error: '该确认请求已过期或不存在' })
+      return { ok: true, approved: !!body?.approved }
     }),
   )
 
