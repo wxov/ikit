@@ -86,6 +86,10 @@ const FAQS: Array<[string, string]> = [
             机器人 + Web 服务 + AI Agent 成套项目，基于自研 Cordis 插件架构；知识库 / 小知（DocCurator）/ 插件商店 /
             多角色权限，Web / 桌面（Tauri）/ 移动（Capacitor）三端同源。
           </p>
+          <p class="about-agent">
+            <b>小知（DocCurator）</b>是 i-kit 内置的知识库文档管家：基于你的知识库做检索问答、把零散资料整理归类，
+            并按需新增、修改文档。所有写入都会先征求你的确认，且仅站主可用；支持配置多个模型，并按会话选择。
+          </p>
           <div class="about-meta">GitHub：<a class="up-link" href="https://github.com/wxov/ikit" target="_blank" rel="noopener">github.com/wxov/ikit</a></div>
         </div>
       </section>
@@ -147,4 +151,11 @@ const FAQS: Array<[string, string]> = [
 .faq-item { border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; background: var(--bg); }
 .faq-q { font-size: 13px; font-weight: 600; cursor: pointer; }
 .faq-a { font-size: 12px; color: var(--muted); line-height: 1.7; margin: 6px 0 0; }
+
+.about-agent {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.75;
+}
 </style>

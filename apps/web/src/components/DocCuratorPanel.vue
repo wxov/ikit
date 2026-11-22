@@ -669,8 +669,9 @@ onMounted(async () => {
 
     <div v-if="loggedIn" ref="chatEl" class="chat">
       <div v-if="!messages.length" class="empty">
-        新建会话后向小知提问，它会按需调用工具（如检索知识库）来回答。<br />
-        示例：先到「知识库」添加条目，再回来问「Cordis 是什么？」
+        我是小知，i-kit 知识库的文档管家。<br />
+        可以帮你检索资料、整理归类，也能新增或修改文档——写入前会先请你确认。<br />
+        直接说需求就行，比如「把上周的会议纪要整理成一篇文档」。
       </div>
 
       <div
