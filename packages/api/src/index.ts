@@ -13,6 +13,40 @@ export async function createApi(ctx: Context, meta: ApiMeta = {}): Promise<Fasti
   const app = Fastify({ logger: false })
   const bus = createBus(ctx)
 
+  // ---- 域名访问白名单（2026-11-23）----
+  // 站点与 API 只允许指定域名访问；`/update/*`（安装包/热更新包）额外允许下载子域。
+  // 环境变量：WEB_ALLOWED_HOSTS（站点+API，逗号分隔）、WEB_DOWNLOAD_HOSTS（仅 /update，逗号分隔）、
+  //           WEB_ALLOW_LOCALHOST=0 关闭本地放行、WEB_HOST_GUARD=0 关闭整个校验（排障用）。
+  const normHost = (h: string) => (h || '').toLowerCase().replace(/:\d+$/, '')
+  const listOf = (v: string | undefined, def: string) =>
+    (v ?? def)
+      .split(',')
+      .map((s) => normHost(s.trim()))
+      .filter(Boolean)
+  const siteHosts = listOf(process.env.WEB_ALLOWED_HOSTS, 'ayioiya.com,ikit.ayioiya.com,www.ayioiya.com')
+  const downloadHosts = listOf(process.env.WEB_DOWNLOAD_HOSTS, 'download.ayioiya.com')
+  const allowLocal = process.env.WEB_ALLOW_LOCALHOST !== '0'
+  const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+  if (process.env.WEB_HOST_GUARD !== '0') {
+    app.addHook('onRequest', async (req, reply) => {
+      const host = normHost(req.headers.host ?? '')
+      if (allowLocal && LOCAL_HOSTS.has(host)) return
+      const path = (req.raw.url ?? '').split('?')[0]
+      const isUpdate = path === '/update' || path.startsWith('/update/')
+      const allowed = isUpdate
+        ? siteHosts.includes(host) || downloadHosts.includes(host)
+        : siteHosts.includes(host)
+      if (allowed) return
+      const allowedText = isUpdate
+        ? [...siteHosts, ...downloadHosts].join(' / ')
+        : siteHosts.join(' / ')
+      reply
+        .code(403)
+        .type('text/plain; charset=utf-8')
+        .send(`403 Forbidden：域名 "${host || '(空)'}" 不在允许列表（允许：${allowedText}）`)
+    })
+  }
+
   await app.register(cors, { origin: true })
   await app.register(websocket)
 

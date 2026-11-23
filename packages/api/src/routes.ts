@@ -29,6 +29,44 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     ts: Date.now(),
   }))
 
+  // 下载中心（公开，2026-11-23）：当前版本 + 各平台安装包/热更新包地址
+  // 地址优先取 env（UPDATE_INSTALLER_URL_TAURI/_ANDROID/_WEB），缺省按站点约定路径推导
+  app.get('/api/update/downloads', async (req) => {
+    const version = meta.version ?? '0.1.0'
+    const host = String((req.headers as any).host ?? '')
+    const origin = host ? `http://${host}` : ''
+    const derive = (name: string) => (origin ? `${origin}/update/${version}/${name}` : '')
+    const tauri = (process.env.UPDATE_INSTALLER_URL_TAURI ?? '').trim()
+    const android = (process.env.UPDATE_INSTALLER_URL_ANDROID ?? '').trim()
+    const web = (process.env.UPDATE_INSTALLER_URL_WEB ?? '').trim()
+    return {
+      version,
+      items: [
+        {
+          id: 'windows',
+          label: 'Windows 桌面安装包',
+          hint: '覆盖安装即可完成更新（.exe）',
+          url: tauri || derive(`i-kit_${version}_x64-setup.exe`),
+          configured: !!tauri,
+        },
+        {
+          id: 'android',
+          label: 'Android 安装包',
+          hint: '覆盖安装即可（.apk，系统需允许安装未知应用）',
+          url: android || derive(`i-kit_${version}.apk`),
+          configured: !!android,
+        },
+        {
+          id: 'web',
+          label: 'Web 热更新包',
+          hint: '分发包（.zip），用于已安装 Web 客户端的热更新',
+          url: web || derive(`web-update-${version}.zip`),
+          configured: !!web,
+        },
+      ],
+    }
+  })
+
   // 热更新：返回可用的 web 版本清单（来源：dist/web-manifest.json）
   // 客户端应传 ?client=<自身版本> 以便精确判断；未上报时视为旧版（提示更新），用于已发布旧包的热更新发现
   app.get('/api/update/manifest', async (req) => {

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { api } from '../lib/api'
 import { fetchUpdateManifest, hasUpdate as hasUpdateFn, detectPlatform, type UpdateInfo } from '../lib/update'
 
 const emit = defineEmits<{ (e: 'close'): void; (e: 'request-update', info: UpdateInfo): void }>()
-const tab = ref<'update' | 'about' | 'help'>('update')
+const tab = ref<'update' | 'about' | 'download' | 'help'>('update')
 const info = ref<UpdateInfo | null>(null)
 const checking = ref(false)
 const checked = ref(false)
@@ -37,7 +37,58 @@ async function loadSystem() {
 onMounted(() => {
   checkUpdate()
   loadSystem()
+  loadDownloads()
 })
+
+// ---- 下载中心（2026-11-23）：各平台安装包 / 热更新包地址 ----
+interface DownloadItem {
+  id: 'windows' | 'android' | 'web'
+  label: string
+  hint: string
+  url: string
+  configured: boolean
+}
+const downloads = ref<DownloadItem[]>([])
+const downloadVersion = ref('')
+const downloadsLoading = ref(false)
+const downloadError = ref('')
+const copiedId = ref('')
+
+async function loadDownloads() {
+  downloadsLoading.value = true
+  downloadError.value = ''
+  try {
+    const r = await api<{ version: string; items: DownloadItem[] }>('/api/update/downloads')
+    downloadVersion.value = r.version
+    downloads.value = r.items
+  } catch (e: any) {
+    downloadError.value = e?.message ?? String(e)
+  } finally {
+    downloadsLoading.value = false
+  }
+}
+
+/** 当前平台对应的下载项（高亮） */
+const currentDownloadId = computed(() =>
+  platform === 'tauri' ? 'windows' : platform === 'capacitor' ? 'android' : 'web',
+)
+
+function openDownload(item: DownloadItem) {
+  if (item.url) window.open(item.url, '_blank', 'noopener')
+}
+
+async function copyDownload(item: DownloadItem) {
+  if (!item.url) return
+  try {
+    await navigator.clipboard.writeText(item.url)
+    copiedId.value = item.id
+    setTimeout(() => {
+      if (copiedId.value === item.id) copiedId.value = ''
+    }, 2000)
+  } catch {
+    downloadError.value = '复制失败，请手动选择链接复制'
+  }
+}
 
 const FAQS: Array<[string, string]> = [
   ['如何使用知识库？', '在首页卡片流或左栏目录中点击文章阅读；站主可点「新建文章」或目录「＋/⋯」管理，支持 Markdown 与封面图。'],
@@ -59,6 +110,7 @@ const FAQS: Array<[string, string]> = [
       <nav class="st-tabs">
         <button :class="{ on: tab === 'update' }" @click="tab = 'update'">检查更新</button>
         <button :class="{ on: tab === 'about' }" @click="tab = 'about'">关于</button>
+        <button :class="{ on: tab === 'download' }" @click="tab = 'download'; loadDownloads()">下载</button>
         <button :class="{ on: tab === 'help' }" @click="tab = 'help'">帮助</button>
       </nav>
 
@@ -94,7 +146,35 @@ const FAQS: Array<[string, string]> = [
         </div>
       </section>
 
-      <section v-else class="st-body">
+      <!-- 下载中心：各平台安装包 / 热更新包（地址来自服务端 /api/update/downloads） -->
+      <section v-else-if="tab === 'download'" class="st-body">
+        <p class="dl-hint">
+          当前服务端版本 <b>v{{ downloadVersion || info?.currentVersion || '…' }}</b>。安装包用于覆盖安装/更新；
+          地址由服务端下发（域名：download 子域）。
+        </p>
+        <div v-if="downloadsLoading" class="dl-hint">加载中…</div>
+        <div v-else class="dl-list">
+          <div v-for="d in downloads" :key="d.id" class="dl-item" :class="{ cur: currentDownloadId === d.id }">
+            <div class="dl-main">
+              <div class="dl-label">
+                {{ d.label }}
+                <span v-if="currentDownloadId === d.id" class="dl-cur">当前平台</span>
+              </div>
+              <div class="dl-hint">{{ d.hint }}</div>
+              <div class="dl-url" :title="d.url">{{ d.url }}</div>
+            </div>
+            <div class="dl-actions">
+              <button class="st-btn" :disabled="!d.url" @click="openDownload(d)">打开下载</button>
+              <button class="st-btn" :disabled="!d.url" @click="copyDownload(d)">
+                {{ copiedId === d.id ? '已复制' : '复制链接' }}
+              </button>
+            </div>
+          </div>
+          <div v-if="downloadError" class="dl-error">❌ {{ downloadError }}</div>
+        </div>
+      </section>
+
+      <section v-else-if="tab === 'help'" class="st-body">
         <div class="faq-list">
           <details v-for="[q, a] in FAQS" :key="q" class="faq-item">
             <summary class="faq-q">{{ q }}</summary>
@@ -157,5 +237,30 @@ const FAQS: Array<[string, string]> = [
   font-size: 12px;
   color: var(--muted);
   line-height: 1.75;
+}
+
+/* 下载中心 */
+.dl-hint { font-size: 12px; color: var(--muted); line-height: 1.7; margin: 0 0 10px; }
+.dl-list { display: flex; flex-direction: column; gap: 10px; }
+.dl-item {
+  display: flex; align-items: center; gap: 12px;
+  border: 1px solid var(--border); border-radius: 12px; padding: 12px;
+}
+.dl-item.cur { border-color: var(--primary); background: var(--primary-soft); }
+.dl-main { flex: 1 1 auto; min-width: 0; }
+.dl-label { font-size: 14px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.dl-cur {
+  font-size: 11px; font-weight: 400; color: var(--primary-dark);
+  border: 1px solid var(--primary); border-radius: 999px; padding: 0 8px;
+}
+.dl-url {
+  font-size: 12px; color: var(--muted); margin-top: 4px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dl-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+.dl-error { font-size: 12px; color: var(--danger, #dc2626); }
+@media (max-width: 768px) {
+  .dl-item { flex-direction: column; align-items: stretch; }
+  .dl-actions { justify-content: flex-end; }
 }
 </style>
