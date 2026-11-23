@@ -1536,7 +1536,7 @@ dependencies = [
 
 [[package]]
 name = "ikit"
-version = "0.2.10"
+version = "0.2.11"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
