@@ -9,7 +9,7 @@
     "prebuild": "node ../../scripts/sync-vditor-assets.mjs",
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
     "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
-    "build:desktop": "cross-env VITE_API_BASE=https://<your-domain> vite build",
+    "build:desktop": "cross-env VITE_API_BASE=http://ayioiya.com vite build",
     "build:mobile": "cross-env VITE_API_BASE=http://192.168.1.100:3000 vite build",
     "build:update": "vite build && node ../../scripts/build-web-update.mjs",
     "preview": "vite preview",
