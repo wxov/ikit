@@ -131,6 +131,10 @@ pnpm dev:web
 
 > 小知支持**多模型（按供应商分组）**：站主在小知面板顶部「⚙ 配置」中按供应商填写 apiBase / API Key，点「⇩ 获取模型列表」即可拉取该供应商可用模型并勾选加入（也可手动填写模型 id），再设默认；小知面板顶部可切换模型（**按会话记忆**）。密钥仅存服务端，界面只显示掩码。
 
+### 域名访问与下载中心
+
+- **域名白名单**：站点与 API 只允许 `WEB_ALLOWED_HOSTS`（默认 `ayioiya.com` / `ikit.ayioiya.com` / `www.ayioiya.com`）；`/update/*` 额外允许 `WEB_DOWNLOAD_HOSTS`（默认 `download.ayioiya.com`）；其他 Host 返回 403。本地开发默认放行 localhost（`WEB_ALLOW_LOCALHOST=0` 关闭），排障可 `WEB_HOST_GUARD=0` 临时关闭。
+- **下载中心**：设置 →「下载」显示当前版本与 Windows / Android / Web 热更新包地址（`GET /api/update/downloads`），可一键打开或复制链接。
 ### 生产模式（同源部署）
 
 ```bash
@@ -263,6 +267,7 @@ WebSocket 实时同步让三端联动（任一端的变更，其他端自动刷�
 | GET | `/api/health` | 健康检查 |
 | GET | `/api/system/info` | 应用与插件信息 |
 | GET | `/api/update/manifest` | 热更新清单（`?client=&platform=tauri/capacitor/web`） |
+| GET | `/api/update/downloads` | 下载中心（公开）：当前版本 + 各平台安装包/热更新包地址 |
 | GET | `/api/demo/hello?name=` | demo 插件服务 |
 | GET | `/api/demo/status` | demo 计数 |
 
