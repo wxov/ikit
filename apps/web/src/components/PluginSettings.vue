@@ -5,6 +5,7 @@ import {
   setPluginEnabled,
   setPluginOrder,
   setPluginGroups,
+  uninstallPlugin,
   type PluginRecord,
 } from '../lib/plugins'
 import { listGroups, type Group } from '../lib/auth'
@@ -25,6 +26,44 @@ const userRole = inject<ComputedRef<string>>('userRole', computed(() => 'guest')
 const isAdmin = computed(() => userRole.value === 'admin')
 // 与 App.vue 的顶部 nav / 移动端 tabbar 顺序联动（无 provider 时降级为仅本列表预览）
 const orderSync = inject<{ preview(names: string[]): void; refresh(): void } | null>('pluginOrderSync', null)
+
+// ---- 删除插件（2026-11-25）：与商店卸载同一接口（DELETE /api/plugin-store/:name），
+// 后端会 dispose 实例 + 物理删除插件目录（目录名/manifest 名不一致时按目录名兜底），避免重启后被 loadAll 重新扫描注册。
+// 用应用内确认替代 window.confirm（桌面/移动 webview 常屏蔽原生 confirm，导致点击无反应）。
+const confirmDelete = ref<PluginRecord | null>(null)
+const deleting = ref(false)
+
+function askDelete(p: PluginRecord) {
+  if (p.builtin) {
+    error.value = '内置插件不可删除'
+    return
+  }
+  error.value = ''
+  notice.value = ''
+  confirmDelete.value = p
+}
+
+function cancelDelete() {
+  confirmDelete.value = null
+}
+
+async function doDelete() {
+  const p = confirmDelete.value
+  if (!p || deleting.value) return
+  deleting.value = true
+  error.value = ''
+  try {
+    await uninstallPlugin(p.name)
+    confirmDelete.value = null
+    notice.value = `已删除插件「${p.title}」`
+    await load()
+    orderSync?.refresh() // 顶部 nav / 移动端 tab 立即去掉该插件入口
+  } catch (e: any) {
+    error.value = e?.message ?? String(e)
+  } finally {
+    deleting.value = false
+  }
+}
 
 /** 按 order 升序归一化：后端 list()/setOrder() 返回的是未排序的原始数组（历史 bug：拖完跳回） */
 function normalize(list: PluginRecord[]): PluginRecord[] {
@@ -218,6 +257,15 @@ onMounted(load)
           <button class="ps-switch" :class="{ on: p.enabled }" @click="toggleEnabled(p)">
             {{ p.enabled ? '启用' : '禁用' }}
           </button>
+          <!-- 删除插件（内置插件不可删除）：连目录一起删，避免重启后重新注册 -->
+          <button
+            v-if="!p.builtin"
+            class="ps-del"
+            :disabled="!isAdmin || saving || deleting"
+            title="删除该插件（含插件目录，不可恢复）"
+            @click="askDelete(p)"
+          >删除</button>
+          <span v-else class="ps-del is-disabled" title="内置插件不可删除">删除</span>
         </div>
         <div class="ps-visibility">
           <span class="ps-vlabel">可见用户组</span>
@@ -234,6 +282,26 @@ onMounted(load)
         </div>
       </div>
     </div>
+
+    <!-- 删除确认：应用内弹窗（替代 window.confirm，桌面/移动 webview 均可点） -->
+    <Teleport to="body">
+      <div v-if="confirmDelete" class="ps-modal-mask" @click.self="cancelDelete">
+        <div class="ps-modal" role="dialog" aria-label="确认删除插件">
+          <div class="ps-modal-title">删除插件「{{ confirmDelete.title }}」？</div>
+          <div class="ps-modal-body">
+            将卸载并物理删除该插件目录（含 <code>{{ confirmDelete.name }}</code>），不可恢复。
+            若只想停用，请用「{{ confirmDelete.enabled ? '禁用' : '启用' }}」开关。
+          </div>
+          <div v-if="error" class="ps-modal-error">{{ error }}</div>
+          <div class="ps-modal-actions">
+            <button class="ps-modal-btn" :disabled="deleting" @click="cancelDelete">取消</button>
+            <button class="ps-modal-btn danger" :disabled="deleting" @click="doDelete">
+              {{ deleting ? '删除中…' : '确认删除' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -395,4 +463,45 @@ onMounted(load)
   font-size: 10px;
   color: var(--primary-dark);
 }
+
+/* ---- 删除插件按钮 + 应用内确认弹窗（2026-11-25） ---- */
+.ps-del {
+  margin-left: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--danger, #dc2626);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--danger, #dc2626);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.ps-del:hover:not(:disabled) { background: rgba(220, 38, 38, 0.08); }
+.ps-del:disabled, .ps-del.is-disabled { opacity: 0.45; cursor: not-allowed; }
+.ps-modal-mask {
+  position: fixed; inset: 0; z-index: 1200;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.ps-modal {
+  width: min(420px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 18px 14px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.35);
+}
+.ps-modal-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.ps-modal-body { margin-top: 8px; font-size: 13px; line-height: 1.7; color: var(--muted); }
+.ps-modal-body code { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.ps-modal-error { margin-top: 8px; font-size: 12px; color: var(--danger, #dc2626); }
+.ps-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.ps-modal-btn {
+  padding: 6px 14px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel); color: var(--text); font-size: 13px; font-family: inherit; cursor: pointer;
+}
+.ps-modal-btn.danger { border-color: var(--danger, #dc2626); background: var(--danger, #dc2626); color: #fff; }
+.ps-modal-btn:disabled { opacity: 0.6; cursor: default; }
 </style>

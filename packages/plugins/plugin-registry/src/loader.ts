@@ -393,30 +393,45 @@ export function createPluginPackageLoader(
   }
 
   // 卸载插件包：释放实例（dispose）+ 从内存移除 + 物理删除目录（仅限插件根下，防穿越）
+  // 2026-11-25：**目录名兜底** —— 注册记录名与插件包 manifest 名可能不一致（如 record=store 条目名、
+  // package.json name 带 scope）。只按 packages.get(name) 会漏删目录，重启后 loadAll 扫描目录重新注册 → “卸载不生效”。
   async function uninstall(name: string): Promise<PluginUninstallResult> {
-    const entry = packages.get(name)
-    if (!entry) {
-      // 未加载的目录包（如商店目录元数据条目）：无目录可删
+    const byName = packages.get(name)
+    const byDir = byName
+      ? undefined
+      : [...packages.values()].find(
+          (e) => path.basename(e.pkgDir) === name || e.manifest.name === name,
+        )
+    const entry = byName ?? byDir
+    // 目录目标：优先实例的 pkgDir；否则按插件根下同名目录（存在才处理）
+    const dirByName = path.join(root, name)
+    const targetDir = entry?.pkgDir ?? (isWithinRoot(dirByName) ? dirByName : null)
+    const hasDir = targetDir ? await fs.stat(targetDir).then(() => true).catch(() => false) : false
+    if (!entry && !hasDir) {
+      // 未加载且无目录（如商店目录元数据条目）：无目录可删
       return { handled: false, ok: true }
     }
-    // 先校验目录在插件根内（防御性：避免越界时已释放/移除内存但未删目录的半状态）
-    if (!isWithinRoot(entry.pkgDir)) {
-      console.error(`[plugin-loader] refuse to delete "${entry.pkgDir}" (outside plugin dir root)`)
+    if (targetDir && !isWithinRoot(targetDir)) {
+      console.error(`[plugin-loader] refuse to delete "${targetDir}" (outside plugin dir root)`)
       return { handled: true, ok: false, error: '目录越界，已拒绝删除' }
     }
     try {
       // 不论 applied 与否都释放（含「注册了服务后 apply 抛错」的半注册状态）
-      if (entry.dispose) entry.dispose()
+      if (entry?.dispose) entry.dispose()
     } catch (e) {
       console.warn(`[plugin-loader] dispose failed during uninstall "${name}":`, e instanceof Error ? e.message : e)
     }
-    packages.delete(name)
+    if (entry) packages.delete(entry.manifest.name)
+    if (!targetDir || !hasDir) {
+      console.log(`[plugin-loader] uninstalled "${name}" (no package directory)`)
+      return { handled: true, ok: true }
+    }
     try {
-      await fs.rm(entry.pkgDir, { recursive: true, force: true })
-      console.log(`[plugin-loader] uninstalled package "${name}": directory removed`)
+      await fs.rm(targetDir, { recursive: true, force: true })
+      console.log(`[plugin-loader] uninstalled package "${name}": directory removed (${targetDir})`)
       return { handled: true, ok: true }
     } catch (e) {
-      console.error(`[plugin-loader] failed to remove directory "${entry.pkgDir}":`, e instanceof Error ? e.message : e)
+      console.error(`[plugin-loader] failed to remove directory "${targetDir}":`, e instanceof Error ? e.message : e)
       return { handled: true, ok: false, error: e instanceof Error ? e.message : String(e) }
     }
   }

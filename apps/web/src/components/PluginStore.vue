@@ -28,6 +28,9 @@ const ratingFor = ref<PluginStoreItem | null>(null)
 const rateScore = ref(5)
 const rateComment = ref('')
 const detailFor = ref<PluginStoreItem | null>(null)
+// 卸载确认（2026-11-25）：应用内弹窗替代 window.confirm —— 桌面/移动 webview 会屏蔽原生 confirm，
+// 导致「点卸载无反应」。确认后调用 DELETE /api/plugin-store/:name（后端会删目录，避免重启后重新注册）。
+const uninstallFor = ref<PluginStoreItem | null>(null)
 // 验签策略（来自 GET /api/plugin-store；enforce 时后端已把不可安装写进 installable/blockedReason）
 const sigMode = ref<SignatureMode>('warn')
 // 安装/导入结果横幅（含扫描警告 + 验签结论）：不再自动 reload，由用户点击「刷新页面以启用」
@@ -180,17 +183,25 @@ async function doUpdate(p: PluginStoreItem) {
   }
 }
 
-async function doUninstall(p: PluginStoreItem) {
-  if (!confirm(`确认卸载「${p.title}」？`)) return
+function askUninstall(p: PluginStoreItem) {
+  error.value = ''
+  notice.value = ''
+  uninstallFor.value = p
+}
+
+async function doUninstall() {
+  const p = uninstallFor.value
+  if (!p) return
   busy.value = p.name
   error.value = ''
   try {
     const r = await uninstallPlugin(p.name)
     store.value = r.store
+    uninstallFor.value = null
     notice.value = `已卸载「${p.title}」，正在刷新…`
     location.reload()
   } catch (e: any) {
-    error.value = e.message
+    error.value = e?.message ?? String(e)
   } finally {
     busy.value = ''
   }
@@ -386,7 +397,7 @@ onMounted(load)
             <button v-if="canUpdate(p)" class="ps-btn" :disabled="busy === p.name" @click="doUpdate(p)">更新</button>
             <button v-else class="ps-btn ok" disabled>已安装</button>
             <button v-if="isThirdParty(p)" class="ps-btn ghost" :disabled="busy === p.name" @click="doExport(p)">导出</button>
-            <button class="ps-btn danger" :disabled="busy === p.name" @click="doUninstall(p)">卸载</button>
+            <button class="ps-btn danger" :disabled="busy === p.name" @click="askUninstall(p)">卸载</button>
           </template>
           <button class="ps-btn ghost" @click="openDetail(p)">详情</button>
           <button class="ps-btn ghost" @click="openRate(p)">评价</button>
@@ -504,13 +515,32 @@ onMounted(load)
             <button v-if="canUpdate(detailFor)" class="ps-btn" :disabled="busy === detailFor.name" @click="doUpdate(detailFor)">更新</button>
             <button v-else class="ps-btn ok" disabled>已安装</button>
             <button v-if="isThirdParty(detailFor)" class="ps-btn ghost" :disabled="busy === detailFor.name" @click="doExport(detailFor)">导出</button>
-            <button class="ps-btn danger" :disabled="busy === detailFor.name" @click="doUninstall(detailFor)">卸载</button>
+            <button class="ps-btn danger" :disabled="busy === detailFor.name" @click="askUninstall(detailFor)">卸载</button>
           </template>
           <button class="ps-btn ghost" @click="openRate(detailFor)">写评价</button>
           <button class="ps-btn ghost" @click="closeDetail">关闭</button>
         </div>
       </div>
     </div>
+
+    <!-- 卸载确认：应用内弹窗（替代 window.confirm） -->
+    <Teleport to="body">
+      <div v-if="uninstallFor" class="ps-modal-mask" @click.self="uninstallFor = null">
+        <div class="ps-modal" role="dialog" aria-label="确认卸载插件">
+          <div class="ps-modal-title">卸载「{{ uninstallFor.title }}」？</div>
+          <div class="ps-modal-body">
+            将卸载插件并删除其插件目录（含 <code>{{ uninstallFor.name }}</code>），不可恢复。
+          </div>
+          <div v-if="error" class="ps-modal-error">{{ error }}</div>
+          <div class="ps-modal-actions">
+            <button class="ps-modal-btn" :disabled="busy === uninstallFor.name" @click="uninstallFor = null">取消</button>
+            <button class="ps-modal-btn danger" :disabled="busy === uninstallFor.name" @click="doUninstall">
+              {{ busy === uninstallFor.name ? '卸载中…' : '确认卸载' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -672,4 +702,31 @@ onMounted(load)
 .ps-sig-line.verified { color: #047857; }
 .ps-sig-line.unsigned { color: var(--muted); }
 .ps-sig-line.invalid { color: var(--danger); }
+
+/* ---- 卸载确认弹窗（应用内，2026-11-25） ---- */
+.ps-modal-mask {
+  position: fixed; inset: 0; z-index: 1200;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.ps-modal {
+  width: min(420px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 18px 14px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.35);
+}
+.ps-modal-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.ps-modal-body { margin-top: 8px; font-size: 13px; line-height: 1.7; color: var(--muted); }
+.ps-modal-body code { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.ps-modal-error { margin-top: 8px; font-size: 12px; color: var(--danger); }
+.ps-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.ps-modal-btn {
+  padding: 6px 14px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel); color: var(--text); font-size: 13px; font-family: inherit; cursor: pointer;
+}
+.ps-modal-btn.danger { border-color: var(--danger); background: var(--danger); color: #fff; }
+.ps-modal-btn:disabled { opacity: 0.6; cursor: default; }
 </style>
