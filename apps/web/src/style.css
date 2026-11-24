@@ -1208,3 +1208,30 @@ select {
 }
 [data-theme='dark'] .md-editor .vditor-reset th,
 [data-theme='dark'] .md-editor .vditor-reset td { border-color: #2a2f3a; }
+/* ===========================================================================
+   点击正文聚焦时不得改变背景 / 描边（2026-11-24）
+   编辑态与阅读态一致：内容区容器恒透明、聚焦无 outline / 无高亮背景。
+   =========================================================================== */
+.md-editor .vditor,
+.md-editor .vditor-content,
+.md-editor .vditor-wysiwyg,
+.md-editor .vditor-reset,
+.article-doc.is-active .md-editor,
+.article-doc.is-active .vditor,
+.article-doc.is-active .vditor-content,
+.article-doc.is-active .vditor-wysiwyg,
+.article-doc.is-active .vditor-reset {
+  background: transparent !important;
+}
+.md-editor .vditor-reset:focus,
+.md-editor .vditor-wysiwyg:focus,
+.md-editor .vditor-content:focus,
+.md-editor .vditor-reset[contenteditable='true']:focus {
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+/* Vditor 内置的块操作浮层（点击正文出现的白色小面板）：已有自建左侧手柄菜单，隐藏之 */
+.md-editor .vditor-panel {
+  display: none !important;
+}
