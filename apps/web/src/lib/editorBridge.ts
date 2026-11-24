@@ -328,21 +328,23 @@ export function normalizeInlineFormats(root: HTMLElement): number {
 }
 
 
-/** 块菜单项列表（供 `EditorBlockHandle.vue` 渲染） */
+/** 块菜单项列表（供 `EditorBlockHandle.vue` 渲染）
+ *  2026-11-24：改为「先选块样式（转为）」再给块操作，符合"点击左侧菜单选择编辑样式"的交互。 */
 export function blockMenuItems(md: string, index: number, total: number): BlockMenuItem[] {
-  const items: BlockMenuItem[] = [
-    { id: 'up', label: '上移', group: 'move', disabled: index <= 0 },
-    { id: 'down', label: '下移', group: 'move', disabled: index >= total - 1 },
-    { id: 'duplicate', label: '复制', group: 'move' },
-    { id: 'delete', label: '删除', group: 'move', danger: true },
-  ]
+  const items: BlockMenuItem[] = []
   const conv = convertTargets(md)
   if (conv.length) {
-    items.push({ id: '__convert-title', label: '转为', group: 'convert', disabled: true })
+    items.push({ id: '__convert-title', label: '编辑样式', group: 'convert', disabled: true })
     for (const c of conv) {
       items.push({ id: `convert:${c.target}`, label: c.label, group: 'convert' })
     }
   }
+  items.push(
+    { id: 'up', label: '上移', group: 'move', disabled: index <= 0 },
+    { id: 'down', label: '下移', group: 'move', disabled: index >= total - 1 },
+    { id: 'duplicate', label: '复制', group: 'move' },
+    { id: 'delete', label: '删除', group: 'move', danger: true },
+  )
   return items
 }
 

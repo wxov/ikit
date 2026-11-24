@@ -2,7 +2,7 @@
 // 飞书式编辑 · 块拖拽手柄 + 块菜单（自建增强）
 //
 // 能力边界（如实说明，见最终报告）：
-// - **已实现**：悬停块左侧出现手柄 → 点击弹块菜单 → 上移 / 下移 / 复制 / 删除 / 转类型
+// - **已实现**：**光标所在块左侧常驻手柄**（2026-11-24 由悬停改为跟随光标）→ 点击弹块菜单 → 编辑样式（转类型）/ 上移 / 下移 / 复制 / 删除
 //   （正文、H1-H3、无序/有序/待办、引用、提示块 callout、代码块）
 //   以及**表格块的增删行列**（在表格内悬停时菜单追加表格项）。
 // - **未实现（降级）**：真正的「按住拖拽把块拖到别处」——Vditor 的 wysiwyg 没有公开的
@@ -16,7 +16,7 @@ import {
   blockIndexOf,
   blockLabel,
   blockMenuItems,
-  closestBlock,
+  currentBlockOf,
   offsetIn,
   runBlockOp,
   runTableOp,
@@ -49,24 +49,44 @@ let cellCtx: { row: number; col: number } | null = null
 
 const hasMenu = computed(() => menuItems.value.length > 0)
 
-/** 悬停：定位手柄到指针下的顶层块左侧 */
-function onMouseMove(e: MouseEvent) {
+/** 2026-11-24：手柄改为**跟随光标所在块**（不再依赖鼠标悬停）：光标移到哪一行，左侧就出现菜单入口 */
+let caretRaf = 0
+
+function syncFromCaret() {
+  if (menuOpen.value) return // 菜单打开时保持锚定
   const editable = props.bridge.editable()
   const host = props.bridge.hostElement()
-  if (!editable || !host) return
-  if (menuOpen.value) return // 菜单打开时保持锚定，避免指针移动导致菜单跳动
-  const target = e.target as Node
-  if (!editable.contains(target)) return
-  const block = closestBlock(target, editable)
-  if (!block) return hideHandle()
+  if (!editable || !host) return hideHandle()
+  const sel = document.getSelection()
+  if (!sel || sel.rangeCount === 0) return hideHandle()
+  const range = sel.getRangeAt(0)
+  if (!editable.contains(range.startContainer)) return hideHandle()
+  const block = currentBlockOf(editable)
+  if (!block || block === editable || !host.contains(block)) return hideHandle()
   const { top, height } = offsetIn(host, block)
   if (anchorBlock !== block) {
     anchorBlock = block
     anchorIndex = blockIndexOf(block, editable)
-    cellCtx = cellContextOf(target, editable)
+    cellCtx = cellContextOf(range.startContainer, editable)
   }
   handleTop.value = top + Math.min(6, Math.max(0, height / 2 - 13))
   handleVisible.value = true
+}
+
+function onSelectionChange() {
+  if (caretRaf) return
+  caretRaf = requestAnimationFrame(() => {
+    caretRaf = 0
+    syncFromCaret()
+  })
+}
+
+/** 焦点移出编辑器（且不是点手柄/菜单）→ 收起手柄 */
+function onFocusOut(e: FocusEvent) {
+  const next = e.relatedTarget as Node | null
+  if (next && rootEl.value?.contains(next)) return
+  if (menuOpen.value) return
+  hideHandle()
 }
 
 /** 指针下的表格单元（行/列序号，0-based；非表格单元格返回 null） */
@@ -180,21 +200,20 @@ function onDocMouseDown(e: MouseEvent) {
 
 function onScroll() {
   if (menuOpen.value) closeMenu()
-  else hideHandle()
+  else onSelectionChange() // 滚动后重新对齐（手柄定位是相对宿主容器的，通常不变，这里兜底）
 }
 
 onMounted(() => {
-  const editable = props.bridge.editable()
-  editable?.addEventListener('mousemove', onMouseMove)
-  editable?.addEventListener('mouseleave', () => hideHandle())
+  document.addEventListener('selectionchange', onSelectionChange)
+  document.addEventListener('focusout', onFocusOut, true)
   document.addEventListener('mousedown', onDocMouseDown, true)
   window.addEventListener('scroll', onScroll, true)
   window.addEventListener('resize', onScroll)
 })
 
 onBeforeUnmount(() => {
-  const editable = props.bridge.editable()
-  editable?.removeEventListener('mousemove', onMouseMove)
+  document.removeEventListener('selectionchange', onSelectionChange)
+  document.removeEventListener('focusout', onFocusOut, true)
   document.removeEventListener('mousedown', onDocMouseDown, true)
   window.removeEventListener('scroll', onScroll, true)
   window.removeEventListener('resize', onScroll)
@@ -269,9 +288,11 @@ defineExpose({ closeMenu })
   border-radius: 5px;
   background: transparent;
   color: var(--muted);
-  cursor: grab;
+  cursor: pointer;
 }
 .ikit-block__handle:hover { background: var(--primary-soft); color: var(--primary-dark); }
+/* 光标所在块的手柄：常驻显示，略淡；hover 加深 */
+.ikit-block__handle { opacity: 0.72; transition: opacity 0.12s ease; }
 .ikit-block__handle svg { fill: currentColor; }
 .ikit-block__menu {
   position: absolute;

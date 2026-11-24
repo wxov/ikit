@@ -1081,3 +1081,125 @@ select {
 .status-dot.archived {
   background: #ea580c;
 }
+
+/* ===========================================================================
+   编辑区样式对齐阅读端（2026-11-24）
+   目标：站主编辑态（Vditor wysiwyg）与游客阅读态（.markdown-body）**视觉一致**，
+   仅保留"可直接编辑"的能力。以下规则追加在文件末尾，按同特异性覆盖前文飞书式排版。
+   =========================================================================== */
+.md-editor .vditor-wysiwyg .vditor-reset { max-width: none; }
+.md-editor .vditor-reset {
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.md-editor .vditor-reset h1,
+.md-editor .vditor-reset h2,
+.md-editor .vditor-reset h3,
+.md-editor .vditor-reset h4,
+.md-editor .vditor-reset h5,
+.md-editor .vditor-reset h6 {
+  margin: 1.6em 0 0.7em;
+  font-weight: 700;
+  line-height: 1.3;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.md-editor .vditor-reset h1 {
+  font-size: 1.6em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.3em;
+}
+.md-editor .vditor-reset h2 {
+  font-size: 1.4em;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.3em;
+}
+.md-editor .vditor-reset h3 { font-size: 1.2em; }
+.md-editor .vditor-reset h4 { font-size: 1.05em; }
+.md-editor .vditor-reset h5,
+.md-editor .vditor-reset h6 { font-size: 1em; color: var(--text); }
+.md-editor .vditor-reset p { margin: 0.8em 0; }
+/* Vditor wysiwyg 自带更具体的 p 规则，这里用同级更高特异性覆盖，保证与阅读端段落间距一致 */
+.md-editor .vditor-wysiwyg .vditor-reset p { margin: 0.8em 0; }
+.md-editor .vditor-wysiwyg .vditor-reset li > p { margin: 0; }
+.md-editor .vditor-reset ul,
+.md-editor .vditor-reset ol { padding-left: 1.6em; margin: 0.8em 0; }
+.md-editor .vditor-reset li { margin: 0.3em 0; }
+.md-editor .vditor-reset li > p { margin: 0; }
+.md-editor .vditor-reset blockquote {
+  margin: 0.8em 0;
+  padding: 0.4em 1em;
+  border-left: 4px solid var(--primary);
+  border-radius: 0 8px 8px 0;
+  background: #f5f8ff;
+  color: var(--muted);
+}
+.md-editor .vditor-reset blockquote p:last-child { margin-bottom: 0; }
+.md-editor .vditor-reset code:not(.hljs) {
+  background: #eef0f4;
+  border-radius: 4px;
+  padding: 0.15em 0.4em;
+  font-size: 0.9em;
+}
+.md-editor .vditor-reset pre {
+  background: #0d1117;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  max-width: 100%;
+  line-height: 1.6;
+}
+.md-editor .vditor-reset pre code,
+.md-editor .vditor-reset pre code.hljs {
+  background: transparent;
+  color: #e2e8f0;
+  padding: 0;
+  font-size: 0.88em;
+}
+.md-editor .vditor-reset table {
+  display: block;
+  border-collapse: collapse;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 1em 0;
+  table-layout: auto;
+}
+.md-editor .vditor-reset th,
+.md-editor .vditor-reset td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  text-align: left;
+  min-width: 6em;
+  font-size: 1em;
+  line-height: 1.6;
+  vertical-align: top;
+}
+.md-editor .vditor-reset th { background: #f8fafc; font-weight: 600; }
+.md-editor .vditor-reset img { max-width: 100%; border-radius: 8px; }
+.md-editor .vditor-reset hr {
+  margin: 1.6em 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+/* 暗色：与阅读端暗色覆盖保持一致 */
+[data-theme='dark'] .md-editor .vditor-reset blockquote {
+  background: #1a1d23;
+  color: #9ca3af;
+  border-left-color: #60a5fa;
+}
+[data-theme='dark'] .md-editor .vditor-reset code:not(.hljs) { background: #2a2f3a; }
+[data-theme='dark'] .md-editor .vditor-reset th {
+  background: #262b36;
+  color: #e5e7eb;
+}
+[data-theme='dark'] .md-editor .vditor-reset td {
+  background: transparent;
+  color: #d1d5db;
+}
+[data-theme='dark'] .md-editor .vditor-reset th,
+[data-theme='dark'] .md-editor .vditor-reset td { border-color: #2a2f3a; }
