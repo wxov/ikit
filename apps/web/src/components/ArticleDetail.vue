@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onMounted, ref, watch, type Ref } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
 import { type KnowledgeEntry } from '../lib/api'
 import { renderMarkdown } from '../lib/markdown'
 import {
@@ -13,6 +13,7 @@ import {
 } from '../lib/docLinks'
 import { docIndex, refreshDocIndex } from '../lib/docIndex'
 import CommentSection from './CommentSection.vue'
+import DocToc, { type TocItem } from './DocToc.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -46,6 +47,53 @@ const isDraft = computed(() => canEdit.value && (props.entry.status ?? 'publishe
 
 const rendered = computed(() => renderMarkdown(props.entry.content))
 const bodyRef = ref<HTMLElement | null>(null)
+
+// ---------------------------------------------------------------------------
+// 右侧目录（TOC，2026-11-24）：从渲染后的正文标题提取；点击滚动定位 + 滚动高亮
+// ---------------------------------------------------------------------------
+const tocItems = ref<TocItem[]>([])
+const activeHeading = ref('')
+const HEAD_OFFSET = 88 // 顶栏（60）+ 间距
+
+function buildToc() {
+  const root = bodyRef.value
+  if (!root) return
+  const list: TocItem[] = []
+  root.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6').forEach((el) => {
+    const text = (el.textContent || '').trim()
+    if (!el.id || !text) return
+    list.push({ id: el.id, level: Number(el.tagName.slice(1)), text })
+  })
+  tocItems.value = list
+}
+
+let scrollRaf = 0
+function updateActiveHeading() {
+  const root = bodyRef.value
+  if (!root) return
+  const heads = Array.from(root.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')).filter((el) => el.id)
+  if (!heads.length) return
+  const line = window.scrollY + HEAD_OFFSET + 8
+  let cur = heads[0].id
+  for (const h of heads) {
+    if (h.getBoundingClientRect().top + window.scrollY <= line) cur = h.id
+  }
+  activeHeading.value = cur
+}
+function onWindowScroll() {
+  if (scrollRaf) return
+  scrollRaf = requestAnimationFrame(() => {
+    scrollRaf = 0
+    updateActiveHeading()
+  })
+}
+function jumpToHeading(id: string) {
+  const el = bodyRef.value?.querySelector<HTMLElement>(`[id="${CSS.escape(id)}"]`)
+  if (!el) return
+  const top = el.getBoundingClientRect().top + window.scrollY - HEAD_OFFSET
+  window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+  activeHeading.value = id
+}
 
 /** 索引是否已成功加载（未加载时**不做失效标记**，避免把「尚未加载」误判为「不存在」） */
 const indexReady = computed(() => Array.isArray(index.value))
@@ -200,10 +248,26 @@ function chooseDoc(id: string) {
   emit('open-doc', id)
 }
 
+// 正文变化（切换文章 / 内容更新）后重建目录并刷新高亮
+watch(rendered, async () => {
+  await nextTick()
+  buildToc()
+  updateActiveHeading()
+})
+
 onMounted(() => {
   // 阅读端索引：App 通常已注入（启动即拉取）；未加载时此处按需补一次（简单缓存 + 在途去重）
   if (!index.value) void refreshDocIndex()
-  void nextTick(applyLinkStates)
+  void nextTick(() => {
+    applyLinkStates()
+    buildToc()
+    updateActiveHeading()
+  })
+  window.addEventListener('scroll', onWindowScroll, { passive: true })
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', onWindowScroll)
 })
 </script>
 
@@ -244,7 +308,17 @@ onMounted(() => {
       </div>
     </div>
 
-    <div ref="bodyRef" class="markdown-body" v-html="rendered.html" @click="onBodyClick"></div>
+    <div class="ad-content">
+      <div ref="bodyRef" class="markdown-body" v-html="rendered.html" @click="onBodyClick"></div>
+      <!-- 右侧目录：跟随正文，滚动高亮 -->
+      <DocToc
+        v-if="tocItems.length"
+        class="ad-toc"
+        :items="tocItems"
+        :active-id="activeHeading"
+        @jump="jumpToHeading"
+      />
+    </div>
 
     <div v-if="entry.tags?.length" class="ad-tags">
       <span v-for="t in entry.tags" :key="t" class="ad-tag" @click="emit('tag', t)"># {{ t }}</span>
@@ -256,6 +330,21 @@ onMounted(() => {
 
 <style scoped>
 .article-detail { padding: 8px 2px 24px; }
+/* 正文 + 右侧目录 */
+.ad-content { display: flex; gap: 20px; align-items: flex-start; }
+.ad-content > .markdown-body { flex: 1 1 auto; min-width: 0; }
+.ad-toc {
+  flex: 0 0 190px;
+  position: sticky;
+  top: 76px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  padding: 4px 0 8px;
+  scrollbar-width: thin;
+}
+@media (max-width: 1120px) {
+  .ad-toc { display: none; }
+}
 .ad-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .ad-actions { display: flex; align-items: center; gap: 8px; }
 .ad-back, .ad-edit, .ad-publish {

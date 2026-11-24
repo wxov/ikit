@@ -1100,6 +1100,12 @@ defineExpose({
 .article-doc.is-collapsed :deep(.md-editor) {
   padding-top: var(--ikit-toolbar-h, 0px);
 }
+/* 窄屏：大纲占宽太大，直接隐藏（可用工具栏「大纲」按钮按需展开） */
+@media (max-width: 900px) {
+  .article-doc :deep(.vditor-outline) {
+    display: none !important;
+  }
+}
 .article-doc.is-collapsed :deep(.vditor-toolbar) {
   display: none;
 }
