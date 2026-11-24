@@ -590,7 +590,11 @@ select {
 .md-editor .vditor-wysiwyg .vditor-reset {
   max-width: none;
   /* 与阅读端对齐：正文左右不留编辑器内边距（标题/正文同一左缘） */
-  padding: 4px 0 60px;
+  padding: 0;
+}
+/* 飞书式：正文可编辑区本身零内边距（Vditor 默认 10px 35px 会形成“框”感） */
+.md-editor .vditor-reset {
+  padding: 0 0 8px !important;
 }
 .md-editor .vditor-reset p {
   margin: 0 0 0.55em;

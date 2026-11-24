@@ -37,7 +37,6 @@ import {
 import { docIndex, docIndexLoading, refreshDocIndex } from '../lib/docIndex'
 import type { EditorBridge } from '../lib/editorBridge'
 import EditorSlashMenu from './EditorSlashMenu.vue'
-import EditorSelectionToolbar from './EditorSelectionToolbar.vue'
 import EditorBlockHandle from './EditorBlockHandle.vue'
 import EditorInlineShortcuts from './EditorInlineShortcuts.vue'
 
@@ -413,10 +412,7 @@ const bridge: EditorBridge = {
   notifyInput: () => emit('input'),
 }
 
-/** 「插入文档链接」选择器（悬浮工具条与降级工具条共用） */
-function openDocPickerFromBar() {
-  void openDocPicker()
-}
+/** 「插入文档链接」选择器（左侧块菜单「插入文档互链」通过隐藏工具栏按钮触发） */
 
 watch(
   () => props.theme,
@@ -484,7 +480,6 @@ defineExpose({
     <template v-if="ready && !failed">
       <EditorInlineShortcuts :bridge="bridge" />
       <EditorSlashMenu :bridge="bridge" />
-      <EditorSelectionToolbar :bridge="bridge" :on-doc-link="openDocPickerFromBar" />
       <EditorBlockHandle :bridge="bridge" />
     </template>
 
