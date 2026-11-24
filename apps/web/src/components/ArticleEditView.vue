@@ -1208,18 +1208,13 @@ defineExpose({
 .ad-cover-preview { margin-top: 6px; }
 .ad-cover-preview img { height: 64px; border-radius: 8px; border: none; object-fit: cover; }
 
-/* ---- 编辑外壳：工具栏 / 状态条 随焦点显隐；收起时工具栏高度以占位补齐（零布局跳动） ---- */
+/* ---- 编辑外壳：2026-11-24 顶部工具栏已整体取消（功能并入左侧悬浮块菜单），正文不再留工具栏占位 ---- */
 .article-doc.is-collapsed :deep(.md-editor) {
-  padding-top: var(--ikit-toolbar-h, 0px);
+  padding-top: 0;
 }
-/* 窄屏：大纲占宽太大，直接隐藏（可用工具栏「大纲」按钮按需展开） */
-@media (max-width: 900px) {
-  .article-doc :deep(.vditor-outline) {
-    display: none !important;
-  }
-}
-.article-doc.is-collapsed :deep(.vditor-toolbar) {
-  display: none;
+.article-doc.is-collapsed :deep(.vditor-toolbar),
+.article-doc.is-active :deep(.vditor-toolbar) {
+  display: none !important;
 }
 .ad-foot { min-height: 30px; } /* 定高槽：收起时留空 → 容器总高一致 */
 .ad-foot-inner {

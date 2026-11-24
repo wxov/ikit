@@ -531,6 +531,10 @@ defineExpose({
 .md-editor :deep(.vditor-reset) {
   background: transparent;
 }
+/* 2026-11-24：取消顶部工具栏（其功能并入左侧悬浮块菜单）；按钮仍保留在 DOM 以支持程序化触发 */
+.md-editor :deep(.vditor-toolbar) {
+  display: none !important;
+}
 .vditor-host {
   min-height: 200px;
 }

@@ -13,13 +13,16 @@
 // 不影响 Markdown 事实源；Vditor 的 `setValue` 内部仍会写入 undo 栈（dist/index.js:16082-16088）。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
+  applyInlineFormat,
   blockIndexOf,
   blockLabel,
   blockMenuItems,
   currentBlockOf,
+  formatMenuItems,
   offsetIn,
   runBlockOp,
   runTableOp,
+  runToolbarAction,
   tableMenuItems,
   type BlockMenuItem,
   type EditorBridge,
@@ -39,6 +42,11 @@ const menuItems = ref<BlockMenuItem[]>([])
 const menuTitle = ref('')
 const rootEl = ref<HTMLElement | null>(null)
 const menuEl = ref<HTMLElement | null>(null)
+/** 「插入链接」行内输入态 */
+const linkOpen = ref(false)
+const linkValue = ref('')
+const linkInput = ref<HTMLInputElement | null>(null)
+let savedRange: Range | null = null
 
 /** 当前锚定的块 */
 let anchorBlock: HTMLElement | null = null
@@ -135,7 +143,8 @@ function openMenu() {
   const block = blocks[anchorIndex]
   if (!block) return
   menuTitle.value = blockLabel(block.md)
-  const items = blockMenuItems(block.md, anchorIndex, blocks.length)
+  // 顶部工具栏已隐藏（2026-11-24）：其功能并入本弹窗 —— 格式组（行内格式/链接/图片/互链/撤销重做/全屏）
+  const items = [...formatMenuItems(), ...blockMenuItems(block.md, anchorIndex, blocks.length)]
   if (block.type === 'table' && cellCtx) {
     const table = parseTable(block.md)
     items.push(...tableMenuItems(table, cellCtx.row, cellCtx.col))
@@ -159,15 +168,67 @@ function openMenu() {
 function closeMenu() {
   menuOpen.value = false
   menuItems.value = []
+  linkOpen.value = false
+  linkValue.value = ''
   hideHandle()
   anchorBlock = null
   anchorIndex = -1
   cellCtx = null
 }
 
+/** 执行「格式」组动作（来自被隐藏的顶部工具栏） */
+function runFormat(name: string) {
+  if (name === 'bold' || name === 'italic' || name === 'strike' || name === 'inline-code') {
+    applyInlineFormat(props.bridge, name)
+    closeMenu()
+    return
+  }
+  if (name === 'link') {
+    openLinkInput()
+    return
+  }
+  // upload / undo / redo / fullscreen / doc-link（自定义互链按钮）
+  runToolbarAction(props.bridge, name === 'doc-link' ? 'ikit-doc-link' : name)
+  closeMenu()
+}
+
+function openLinkInput() {
+  const sel = document.getSelection()
+  savedRange = sel && sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null
+  linkOpen.value = true
+  linkValue.value = ''
+  void nextTick(() => linkInput.value?.focus({ preventScroll: true }))
+}
+
+function applyLink() {
+  const url = linkValue.value.trim()
+  if (!url) return cancelLink()
+  if (savedRange) {
+    try {
+      const sel = document.getSelection()
+      sel?.removeAllRanges()
+      sel?.addRange(savedRange)
+      document.execCommand('createLink', false, url)
+    } catch {
+      /* 选区失效 → 忽略 */
+    }
+  }
+  props.bridge.notifyInput()
+  closeMenu()
+}
+
+function cancelLink() {
+  linkOpen.value = false
+  linkValue.value = ''
+}
+
 /** 执行一个块菜单项 */
 function runItem(item: BlockMenuItem) {
   if (item.disabled) return
+  if (item.id.startsWith('format:')) {
+    runFormat(item.id.slice('format:'.length))
+    return
+  }
   const md = props.bridge.readValue()
   let next: string | null = null
   if (item.id === 'up' || item.id === 'down' || item.id === 'duplicate' || item.id === 'delete') {
@@ -199,6 +260,7 @@ function onDocMouseDown(e: MouseEvent) {
 }
 
 function onScroll() {
+  if (linkOpen.value) return // 链接输入态：不因滚动/聚焦关闭菜单
   if (menuOpen.value) closeMenu()
   else onSelectionChange() // 滚动后重新对齐（手柄定位是相对宿主容器的，通常不变，这里兜底）
 }
@@ -255,7 +317,18 @@ defineExpose({ closeMenu })
       @mousedown.prevent
     >
       <div class="ikit-block__title">{{ menuTitle }}</div>
+      <div v-if="linkOpen" class="ikit-block__link">
+        <input
+          ref="linkInput"
+          v-model="linkValue"
+          placeholder="https://…"
+          @keydown.enter.prevent="applyLink"
+          @keydown.esc.prevent="cancelLink"
+        />
+        <button class="ikit-block__link-ok" type="button" @click="applyLink">确定</button>
+      </div>
       <template v-for="(item, i) in menuItems" :key="item.id">
+        <div v-if="item.group === 'format' && (i === 0 || menuItems[i - 1].group !== 'format')" class="ikit-block__sep" />
         <div v-if="item.group === 'convert' && (i === 0 || menuItems[i - 1].group !== 'convert')" class="ikit-block__sep" />
         <div v-if="item.group === 'table' && (i === 0 || menuItems[i - 1].group !== 'table')" class="ikit-block__sep" />
         <button
@@ -318,6 +391,17 @@ defineExpose({ closeMenu })
   max-width: 220px;
 }
 .ikit-block__sep { height: 1px; margin: 4px 6px; background: var(--border); }
+.ikit-block__link { display: flex; align-items: center; gap: 4px; margin: 4px 4px 6px; }
+.ikit-block__link input {
+  flex: 1; min-width: 0; height: 26px; padding: 0 8px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text); font-size: 12px; font-family: inherit;
+}
+.ikit-block__link-ok {
+  flex: 0 0 auto; height: 26px; padding: 0 10px;
+  border: 1px solid var(--primary); border-radius: 6px;
+  background: var(--primary); color: #fff; font-size: 12px; cursor: pointer; font-family: inherit;
+}
 .ikit-block__item {
   display: block;
   width: 100%;

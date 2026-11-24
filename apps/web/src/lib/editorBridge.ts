@@ -91,8 +91,8 @@ export function offsetIn(host: HTMLElement, el: Element): { left: number; top: n
 export interface BlockMenuItem {
   id: string
   label: string
-  /** 分组：move=移动/复制删除，convert=转类型，table=表格增删 */
-  group: 'move' | 'convert' | 'table'
+  /** 分组：format=行内格式（来自工具栏），move=移动/复制删除，convert=转类型，table=表格增删 */
+  group: 'format' | 'move' | 'convert' | 'table'
   danger?: boolean
   disabled?: boolean
 }
@@ -325,6 +325,56 @@ export function normalizeInlineFormats(root: HTMLElement): number {
     changed++
   }
   return changed
+}
+
+// ---------------------------------------------------------------------------
+// 工具栏动作桥接（2026-11-24）：顶部工具栏已隐藏，改为左侧悬浮块菜单里触发。
+// 原理：Vditor 工具栏按钮的格式动作是公开渲染管线（MenuItem 监听 CustomEvent('click')，
+// 走 document.getSelection() → execCommand / link 包裹 / undo 栈）。只要按钮仍在 DOM
+// （display:none 也算），派发同款 CustomEvent 即等价于用户点按钮，且不破坏撤销。
+// ---------------------------------------------------------------------------
+
+/** 派发 Vditor 工具栏按钮的点击（等价于用户点工具栏；按钮隐藏在 DOM 中依然有效） */
+export function runToolbarAction(bridge: EditorBridge, name: string): boolean {
+  const host = bridge.hostElement()
+  const container = host?.closest('.md-editor') ?? document.querySelector('.md-editor') ?? document
+  const selector =
+    name === 'ikit-doc-link'
+      ? '.vditor-toolbar .ikit-toolbar-doc'
+      : `.vditor-toolbar [data-type="${name}"]`
+  const btn = container.querySelector<HTMLElement>(selector)
+  if (!btn) return false
+  btn.dispatchEvent(new CustomEvent('click'))
+  return true
+}
+
+/** 应用行内格式（加粗/斜体/删除线/行内代码）并归一化 + 通知变更 */
+export function applyInlineFormat(bridge: EditorBridge, name: string): void {
+  runToolbarAction(bridge, name)
+  const editable = bridge.editable()
+  if (editable) {
+    const changed = normalizeInlineFormats(editable)
+    if (changed > 0) {
+      editable.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }))
+    }
+  }
+  bridge.notifyInput()
+}
+
+/** 左侧悬浮块菜单里的「格式」组（来自被隐藏的顶部工具栏） */
+export function formatMenuItems(): BlockMenuItem[] {
+  return [
+    { id: 'format:bold', label: '加粗', group: 'format' },
+    { id: 'format:italic', label: '斜体', group: 'format' },
+    { id: 'format:strike', label: '删除线', group: 'format' },
+    { id: 'format:inline-code', label: '行内代码', group: 'format' },
+    { id: 'format:link', label: '插入链接', group: 'format' },
+    { id: 'format:upload', label: '插入图片', group: 'format' },
+    { id: 'format:doc-link', label: '插入文档互链', group: 'format' },
+    { id: 'format:undo', label: '撤销', group: 'format' },
+    { id: 'format:redo', label: '重做', group: 'format' },
+    { id: 'format:fullscreen', label: '全屏', group: 'format' },
+  ]
 }
 
 
