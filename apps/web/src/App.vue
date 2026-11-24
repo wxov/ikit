@@ -1345,7 +1345,8 @@ onUnmounted(() => {
 .pl-doc-tree::-webkit-scrollbar-track { background: transparent; }
 .portal-main {
   min-width: 0;
-  overflow: hidden;
+  /* 不用 overflow:hidden：它会成为不滚动的滚动容器，导致正文目录的 position:sticky 失效（跟随内容滚走） */
+  overflow: visible;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 14px;
