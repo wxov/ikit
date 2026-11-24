@@ -155,13 +155,15 @@ function openMenu() {
     const host = props.bridge.hostElement()
     if (!host) return
     const h = host.getBoundingClientRect()
-    // 菜单贴在手柄右侧；右侧空间不足时贴到手柄左侧
+    // 菜单 Teleport 到 body + fixed：用视口坐标定位（贴在手柄右侧；右侧空间不足时贴到手柄左侧）
     const menuW = menuEl.value?.offsetWidth ?? 190
     const handleViewportX = h.left + HANDLE_LEFT
     let l = handleViewportX + 26
     if (l + menuW > window.innerWidth - 8) l = Math.max(8, handleViewportX - menuW - 6)
-    menuLeft.value = l - h.left
-    menuTop.value = Math.max(4, Math.min(handleTop.value, Math.max(4, h.height - 12)))
+    menuLeft.value = l
+    // 纵向：先随锚定块，再夹到视口内（max-height 340 + 12 余量），避免菜单下半截不可达
+    const rawTop = h.top + Math.min(handleTop.value, Math.max(4, h.height - 12))
+    menuTop.value = Math.max(4, Math.min(rawTop, window.innerHeight - 352))
   })
 }
 
@@ -259,7 +261,10 @@ function onDocMouseDown(e: MouseEvent) {
   closeMenu()
 }
 
-function onScroll() {
+function onScroll(e: Event) {
+  // 菜单自身滚动（Teleport 到 body 的 fixed 菜单）不关闭，否则滚动菜单会被误关
+  const t = e.target as Node | null
+  if (t && menuEl.value && (t === menuEl.value || menuEl.value.contains(t))) return
   if (linkOpen.value) return // 链接输入态：不因滚动/聚焦关闭菜单
   if (menuOpen.value) closeMenu()
   else onSelectionChange() // 滚动后重新对齐（手柄定位是相对宿主容器的，通常不变，这里兜底）
@@ -307,15 +312,15 @@ defineExpose({ closeMenu })
       </svg>
     </button>
 
-    <!-- 块菜单 -->
-    <div
-      v-if="menuOpen && hasMenu"
-      ref="menuEl"
-      class="ikit-block__menu"
-      :style="{ left: menuLeft + 'px', top: menuTop + 'px' }"
-      role="menu"
-      @mousedown.prevent
-    >
+    <!-- 块菜单：Teleport 到 body + fixed，避免被编辑器容器裁剪、保证可滚动/可点击 -->
+    <Teleport to="body">
+      <div
+        v-if="menuOpen && hasMenu"
+        ref="menuEl"
+        class="ikit-block__menu"
+        :style="{ left: menuLeft + 'px', top: menuTop + 'px' }"
+        role="menu"
+      >
       <div class="ikit-block__title">{{ menuTitle }}</div>
       <div v-if="linkOpen" class="ikit-block__link">
         <input
@@ -325,7 +330,7 @@ defineExpose({ closeMenu })
           @keydown.enter.prevent="applyLink"
           @keydown.esc.prevent="cancelLink"
         />
-        <button class="ikit-block__link-ok" type="button" @click="applyLink">确定</button>
+        <button class="ikit-block__link-ok" type="button" @mousedown.prevent @click="applyLink">确定</button>
       </div>
       <template v-for="(item, i) in menuItems" :key="item.id">
         <div v-if="item.group === 'format' && (i === 0 || menuItems[i - 1].group !== 'format')" class="ikit-block__sep" />
@@ -337,12 +342,14 @@ defineExpose({ closeMenu })
           type="button"
           role="menuitem"
           :disabled="item.disabled"
+          @mousedown.prevent
           @click="runItem(item)"
         >
           {{ item.label }}
         </button>
       </template>
-    </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -368,11 +375,16 @@ defineExpose({ closeMenu })
 .ikit-block__handle { opacity: 0.72; transition: opacity 0.12s ease; }
 .ikit-block__handle svg { fill: currentColor; }
 .ikit-block__menu {
-  position: absolute;
-  z-index: 42;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1200;
   min-width: 168px;
-  max-height: 320px;
+  max-height: 340px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
   padding: 5px;
   background: var(--panel);
   border: 1px solid var(--border);
