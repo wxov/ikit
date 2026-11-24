@@ -588,8 +588,9 @@ select {
 }
 /* 编辑区宽度：飞书式为居中窄栏，超宽屏下行宽更舒适 */
 .md-editor .vditor-wysiwyg .vditor-reset {
-  max-width: 860px;
-  padding: 22px 28px 60px;
+  max-width: none;
+  /* 与阅读端对齐：正文左右不留编辑器内边距（标题/正文同一左缘） */
+  padding: 4px 0 60px;
 }
 .md-editor .vditor-reset p {
   margin: 0 0 0.55em;

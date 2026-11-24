@@ -1052,49 +1052,54 @@ defineExpose({
   background: rgba(220, 38, 38, 0.08); color: var(--danger); border: 1px solid var(--danger);
 }
 
-/* ---- 字段：非焦点态＝静态文本（透明边框/底色，不改变任何几何）；悬停 / 聚焦 / 外壳展开 → 出现输入控件外观 ---- */
+/* ---- 字段：2026-11-24 编辑态不出现编辑框 —— 一律纯文本呈现（无边框/底色/内边距），聚焦只显示光标 ---- */
 .ad-field {
-  border: 1px solid transparent;
+  border: none;
   background: transparent;
   color: var(--text);
   font-family: inherit;
-  border-radius: 8px;
-  padding: 6px 10px;
+  border-radius: 0;
+  padding: 0;
   width: 100%;
   outline: none;
-  transition: border-color 0.12s ease, background-color 0.12s ease;
+  box-shadow: none;
 }
 .ad-field:hover,
 .ad-field:focus,
 .article-doc.is-active .ad-field {
-  border-color: var(--border);
-  background: var(--bg);
+  border: none;
+  background: transparent;
 }
+.ad-field::placeholder { color: var(--muted); }
 .ad-title {
   font-size: 26px;
   font-weight: 700;
   line-height: 1.3;
-  padding: 6px 10px;
-  margin: 0;
+  padding: 0;
+  margin: 0 0 8px;
 }
 .ad-meta {
   display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px;
   font-size: 13px; color: var(--muted);
-  min-height: 34px;
+  min-height: 24px;
 }
-.ad-cat { width: auto; min-width: 120px; max-width: 320px; font-size: 13px; padding: 5px 8px; }
+.ad-cat { width: auto; min-width: 60px; max-width: 320px; font-size: 13px; padding: 0; }
 .am-ico { font-size: 13px; }
 .am b { font-weight: 400; margin-right: 2px; }
-.ad-field-row { display: flex; align-items: center; gap: 6px; min-height: 34px; }
+.ad-field-row { display: flex; align-items: center; gap: 6px; min-height: 24px; }
 .ad-ico { color: var(--muted); font-size: 13px; flex: 0 0 auto; }
-.ad-tags-input, .ad-cover-input { font-size: 13px; padding: 5px 8px; }
-/* 封面上传按钮：随焦点/悬停出现（字段控件按需出现），行高由输入框决定 → 不影响纵向几何 */
+.ad-tags-input, .ad-cover-input { font-size: 13px; padding: 0; }
+/* 封面操作：纯文字链接（悬停/聚焦出现），不出现按钮框 */
 .ad-cover-actions { display: none; flex: 0 0 auto; }
 .article-doc.is-active .ad-cover-actions,
 .ad-cover:hover .ad-cover-actions,
 .ad-cover:focus-within .ad-cover-actions { display: inline-flex; }
-.ad-cover-preview { display: flex; align-items: center; gap: 10px; }
-.ad-cover-preview img { height: 64px; border-radius: 8px; border: 1px solid var(--border); object-fit: cover; }
+.ad-cover-actions .ad-btn {
+  border: none; background: transparent; color: var(--primary-dark);
+  padding: 0 4px; font-size: 12px; box-shadow: none;
+}
+.ad-cover-preview { margin-top: 6px; }
+.ad-cover-preview img { height: 64px; border-radius: 8px; border: none; object-fit: cover; }
 
 /* ---- 编辑外壳：工具栏 / 状态条 随焦点显隐；收起时工具栏高度以占位补齐（零布局跳动） ---- */
 .article-doc.is-collapsed :deep(.md-editor) {

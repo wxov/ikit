@@ -516,12 +516,20 @@ defineExpose({
 </template>
 
 <style scoped>
+/* 2026-11-24：编辑态与阅读态一致 —— 不出现编辑框（无边框/底色/圆角） */
 .md-editor {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
-  background: var(--panel);
+  border: none;
+  border-radius: 0;
+  background: transparent;
   position: relative;
+}
+.md-editor :deep(.vditor) {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+.md-editor :deep(.vditor-reset) {
+  background: transparent;
 }
 .vditor-host {
   min-height: 200px;
