@@ -38,6 +38,7 @@ import {
 } from '../lib/docLinks'
 import { docIndex, refreshDocIndex } from '../lib/docIndex'
 import VditorEditor from './VditorEditor.vue'
+import DocToc, { type TocItem } from './DocToc.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -656,12 +657,77 @@ async function onFilePick(e: Event) {
   }
 }
 
+// ---- 正文右侧目录（与阅读端同一组件 DocToc，2026-11-24）：从编辑器 DOM 提取标题，滚动高亮 + 点击定位 ----
+const tocItems = ref<TocItem[]>([])
+const activeHeading = ref('')
+let tocObserver: MutationObserver | null = null
+let tocTimer = 0
+
+function editorBodyEl(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('.article-doc .vditor-reset')
+}
+function editorHeadings(): HTMLElement[] {
+  const root = editorBodyEl()
+  return root ? Array.from(root.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')) : []
+}
+function buildToc() {
+  const list: TocItem[] = []
+  editorHeadings().forEach((el, i) => {
+    const text = (el.textContent || '').trim()
+    if (!text) return
+    list.push({ id: `edit-h-${i}`, level: Number(el.tagName.slice(1)), text })
+  })
+  tocItems.value = list
+}
+function updateActiveHeading() {
+  const heads = editorHeadings()
+  if (!heads.length) return
+  const line = window.scrollY + 96
+  let cur = ''
+  heads.forEach((h, i) => {
+    if (h.getBoundingClientRect().top + window.scrollY <= line) cur = `edit-h-${i}`
+  })
+  activeHeading.value = cur
+}
+function onTocScroll() {
+  if (tocTimer) return
+  tocTimer = window.setTimeout(() => {
+    tocTimer = 0
+    updateActiveHeading()
+  }, 80)
+}
+function jumpToHeading(id: string) {
+  const idx = Number(id.replace('edit-h-', ''))
+  const el = editorHeadings()[idx]
+  if (!el) return
+  window.scrollTo({ top: Math.max(0, el.getBoundingClientRect().top + window.scrollY - 88), behavior: 'smooth' })
+  activeHeading.value = id
+}
+function setupToc() {
+  buildToc()
+  updateActiveHeading()
+  if (tocObserver) return
+  const root = editorBodyEl()
+  if (!root) return
+  // 编辑器内容变化（输入/转换块样式）→ 防抖重建目录
+  tocObserver = new MutationObserver(() => {
+    if (tocTimer) return
+    tocTimer = window.setTimeout(() => {
+      tocTimer = 0
+      buildToc()
+      updateActiveHeading()
+    }, 250)
+  })
+  tocObserver.observe(root, { childList: true, subtree: true, characterData: true })
+}
+
 // ---- 编辑器 ready：建立「已保存」基线（避免空草稿立即建条目 / 首次误判为脏）+ 工具栏占位测量 ----
 function onEditorReady() {
   autosaver.prime()
   refreshStats()
   void measureToolbar()
   void nextTick(applyLinkStates)
+  void nextTick(setupToc)
   // 本地存在比服务端更新的内容 → 非弹窗提示条
   const snap = readSnapshot(initialKey)
   if (
@@ -813,6 +879,7 @@ onMounted(() => {
   document.addEventListener('keydown', onDocKeydown, true)
   window.addEventListener('focus', onWindowFocus)
   window.addEventListener('resize', onWindowResize)
+  window.addEventListener('scroll', onTocScroll, { passive: true })
   window.addEventListener('beforeunload', onBeforeUnload)
   nowTick.value = Date.now()
   // 驱动「已保存 HH:MM」10s 后淡化（不参与输入路径，开销可忽略）
@@ -827,6 +894,11 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onDocKeydown, true)
   window.removeEventListener('focus', onWindowFocus)
   window.removeEventListener('resize', onWindowResize)
+  window.removeEventListener('scroll', onTocScroll)
+  tocObserver?.disconnect()
+  tocObserver = null
+  if (tocTimer) window.clearTimeout(tocTimer)
+  tocTimer = 0
   window.removeEventListener('beforeunload', onBeforeUnload)
   if (nowTimer) clearInterval(nowTimer)
   if (resizeTimer) clearTimeout(resizeTimer)
@@ -968,15 +1040,25 @@ defineExpose({
     </div>
 
     <!-- 正文：常驻 Vditor（wysiwyg 富文本即文档形态）；工具栏随外壳显隐，收起时按实测高度占位 -->
-    <VditorEditor
-      ref="editorRef"
-      :value="entry?.content ?? ''"
-      :theme="theme"
-      :link-click="onEditorLinkClick"
-      @input="onBodyInput"
-      @blur="onBlur"
-      @ready="onEditorReady"
-    />
+    <div class="ad-body">
+      <VditorEditor
+        ref="editorRef"
+        :value="entry?.content ?? ''"
+        :theme="theme"
+        :link-click="onEditorLinkClick"
+        @input="onBodyInput"
+        @blur="onBlur"
+        @ready="onEditorReady"
+      />
+      <!-- 右侧目录：与游客阅读端同一套 DocToc（同宽/同定位/同高亮逻辑） -->
+      <DocToc
+        v-if="tocItems.length"
+        class="ad-toc"
+        :items="tocItems"
+        :active-id="activeHeading"
+        @jump="jumpToHeading"
+      />
+    </div>
 
     <!-- 底部状态条槽：**高度恒定**（收起时留空），保证两态容器几何一致 -->
     <div class="ad-foot">
@@ -1010,6 +1092,31 @@ defineExpose({
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* ---- 正文 + 右侧目录：与阅读端 .ad-content / .ad-toc 完全同构（2026-11-24） ---- */
+.ad-body {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  width: 100%;
+  min-width: 0;
+}
+.ad-body > :deep(.md-editor) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ad-toc {
+  flex: 0 0 190px;
+  position: sticky;
+  top: 76px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  padding: 4px 0 8px;
+  scrollbar-width: thin;
+}
+@media (max-width: 1120px) {
+  .ad-toc { display: none; }
 }
 
 /* ---- 顶部条（恒在流内，两态同高） ---- */

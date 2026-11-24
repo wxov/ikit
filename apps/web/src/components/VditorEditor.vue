@@ -238,7 +238,7 @@ async function init() {
       // 字数统计（飞书式状态条的数据来源之一；父组件另在底部状态条展示）
       counter: { enable: true, type: 'text' },
       // 大纲侧栏（默认收起，点工具栏「大纲」展开；位置左）
-      outline: { enable: true, position: 'right' },
+      outline: { enable: false, position: 'right' },
       typewriterMode: false,
       resize: { enable: false },
       // 工具栏按飞书式分组：标题 | 行内格式 | 列表 | 块 | 插入/媒体 | 自定义互链 | 历史/视图
