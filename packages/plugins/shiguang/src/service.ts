@@ -93,6 +93,14 @@ export function createShiguangService(persist: ShiguangPersist, options: Shiguan
       tokens.clear()
     },
 
+    async resetPasscode(): Promise<void> {
+      const data = await persist.load()
+      delete data.passcodeHash
+      delete data.passcodeSalt
+      await persist.save(data)
+      tokens.clear()
+    },
+
     async unlock(passcode: string): Promise<ShiguangUnlockResult> {
       const now = Date.now()
       if (lockedUntil > now) {

@@ -57,6 +57,8 @@ export interface ShiguangService {
   status(): Promise<ShiguangStatus>
   hasPasscode(): Promise<boolean>
   setPasscode(input: ShiguangSetPasscodeInput): Promise<void>
+  /** 重置开门密码（清除密码，内容保留；仅站主可用） */
+  resetPasscode(): Promise<void>
   unlock(passcode: string): Promise<ShiguangUnlockResult>
   lock(token: string | undefined): void
   verify(token: string | undefined): boolean

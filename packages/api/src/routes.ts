@@ -635,6 +635,14 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     }),
   )
 
+  // 忘记密码：站主可重置（清除密码，内容保留；用于把自己锁在外面的恢复路径）
+  app.post('/api/shiguang/passcode/reset', (req, reply) =>
+    requireAdmin(req, reply, async () => {
+      await ctx.shiguang.resetPasscode()
+      return { ok: true }
+    }),
+  )
+
   app.post('/api/shiguang/unlock', (req, reply) =>
     requireUser(req, reply, async () => {
       const { passcode } = (req.body ?? {}) as { passcode?: string }

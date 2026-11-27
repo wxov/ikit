@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 拾光（日记 · 感悟 · 名言）—— 默认内置插件；开门密码保护（解锁令牌仅在内存，刷新/锁上后需重新输入）
-import { computed, onMounted, ref } from 'vue'
+import { computed, inject, onMounted, ref, type Ref } from 'vue'
 import { api } from '../lib/api'
 import { authHeaders } from '../lib/auth'
 
@@ -24,6 +24,11 @@ const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
 const notice = ref('')
+/** 忘记密码：重置确认态（仅站主可用；清除密码、保留内容） */
+const resetOpen = ref(false)
+
+const userRole = inject<Ref<string>>('userRole', ref('guest'))
+const isAdmin = computed(() => userRole.value === 'admin')
 
 const hasPasscode = ref(false)
 const token = ref('')
@@ -100,6 +105,35 @@ async function doUnlock() {
     token.value = r.token
     pass1.value = ''
     await loadEntries()
+  } catch (e: any) {
+    const msg = errMsg(e)
+    // 数据里还没有密码（如刚被重置 / 首次进入）→ 直接切到设置态，避免误导成“密码错误”
+    if (msg.includes('尚未设置开门密码')) {
+      hasPasscode.value = false
+      mode.value = 'setup'
+      pass1.value = ''
+    }
+    error.value = msg
+  } finally {
+    busy.value = false
+  }
+}
+
+/** 忘记密码（站主）：清除开门密码，内容保留，回到「设置密码」 */
+async function doResetPasscode() {
+  if (busy.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    await api('/api/shiguang/passcode/reset', { method: 'POST', headers: authHeaders() })
+    token.value = ''
+    entries.value = []
+    hasPasscode.value = false
+    resetOpen.value = false
+    pass1.value = ''
+    pass2.value = ''
+    mode.value = 'setup'
+    notice.value = '密码已重置，请重新设置开门密码（内容已保留）'
   } catch (e: any) {
     error.value = errMsg(e)
   } finally {
@@ -318,6 +352,17 @@ onMounted(loadStatus)
         <p class="sg-lock-tip">输入开门密码</p>
         <input v-model="pass1" class="sg-input" type="password" placeholder="开门密码" @keydown.enter="doUnlock" />
         <button class="sg-btn primary" :disabled="busy" @click="doUnlock">{{ busy ? '验证中…' : '解锁' }}</button>
+        <!-- 忘记密码：站主可重置（清除密码、保留内容） -->
+        <div v-if="isAdmin" class="sg-forgot">
+          <button v-if="!resetOpen" class="sg-link" @click="resetOpen = true">忘记密码？</button>
+          <div v-else class="sg-reset">
+            <p class="sg-reset-tip">重置会清除开门密码（日记 / 感悟 / 名言内容保留），仅站主可操作。</p>
+            <div class="sg-row">
+              <button class="sg-btn sm ghost" @click="resetOpen = false">取消</button>
+              <button class="sg-btn sm danger" :disabled="busy" @click="doResetPasscode">确认重置</button>
+            </div>
+          </div>
+        </div>
       </template>
     </div>
 
@@ -464,4 +509,16 @@ onMounted(loadStatus)
   .sg-toolbar { gap: 4px; }
   .sg-btn.sm { padding: 4px 8px; }
 }
+.sg-forgot { margin-top: 2px; text-align: center; }
+.sg-link {
+  border: none; background: transparent; color: var(--muted);
+  font-size: 12px; font-family: inherit; cursor: pointer; text-decoration: underline;
+  padding: 2px 4px;
+}
+.sg-link:hover { color: var(--primary-dark); }
+.sg-reset {
+  margin-top: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg); text-align: left;
+}
+.sg-reset-tip { margin: 0 0 8px; font-size: 12px; color: var(--danger, #dc2626); line-height: 1.7; }
 </style>
