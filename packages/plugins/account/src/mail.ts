@@ -30,11 +30,11 @@ export function createSmtpSender(cfg: SmtpConfig) {
 
 function sendEmail(cfg: SmtpConfig, port: number, from: string, to: string, subject: string, html: string) {
   return new Promise<void>((resolve, reject) => {
-    let raw = cfg.secure ? tlsConnect({ host: cfg.host, port, servername: cfg.host }) : netConnect(port, cfg.host)
+    const raw = cfg.secure ? tlsConnect({ host: cfg.host, port, servername: cfg.host }) : netConnect(port, cfg.host)
     let stage = 'greeting'
     const lines: string[] = []
     let buf = ''
-    let greeted = false
+    const greeted = false
 
     const abort = (err: Error) => {
       raw.destroy()

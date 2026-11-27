@@ -291,12 +291,25 @@ docs/         需求 / 技术 / 验收文档
   - `pnpm -r build` 通过；`pnpm test` 42/42
 - 后续：前端 `App.vue`（1562）/ `DocCuratorPanel.vue`（1322）/ `ArticleEditView.vue`（1294）；`routes.ts` 剩余（插件注册表 / demo / 上传 / health / 下载中心 / 系统信息）按需再拆。
 
+### ✅ P2-9 ESLint + Prettier（2026-11-28）
+- **ESLint 9 扁平配置**（`eslint.config.mjs`）：`@eslint/js` recommended + `typescript-eslint` recommended + `eslint-plugin-vue` **flat/essential**（仅正确性规则，避免格式类规则造成历史代码大改）。
+- **Prettier 3**：`.prettierrc.json`（无分号 / 单引号 / 120 列 / LF）、`.prettierignore`。
+- 新增脚本：`pnpm lint`、`pnpm format`、`pnpm format:check`；CI 已加入 `pnpm lint`（build → version → **lint** → test）。
+- **结果：0 errors / 36 warnings**。主要 warnings 为未使用导入/参数（已允许 `_` 前缀忽略）。
+- 有意关闭的规则及理由：
+  - `@typescript-eslint/no-explicit-any`：存量 146 处显式 `any`，逐步治理，不阻塞 CI；
+  - `no-console`：日志统一走 `@ikit/shared` logger，其实现必须用 `console`；
+  - `vue/multi-word-component-names`：现有单文件组件命名；
+  - `vue/no-v-html`：Markdown 渲染已 `html: false` + KaTeX `trust: false` 兜底。
+- **暂不强制格式检查**（`format:check` 未入 CI）：历史代码风格未统一，全量 format 会产生巨大 diff；新增/改动文件可手动 `pnpm format`，后续逐步收紧。
+- 顺带修复的真实问题：`editorBlocks.ts` 正则多余转义、脚本稀疏数组、`mail.ts` 两处 `let → const`。
+
 ### 待处理
-- P2-9 ESLint/Prettier（依赖离线不可得，待网络可用时引入）；
-- P2-10 其余巨型文件（前端组件 + routes.ts 其余域）；
+- P2-10 其余巨型文件（前端 `App.vue` / `DocCuratorPanel.vue` / `ArticleEditView.vue`）；
 - P2-11 其余写接口补 schema；
 - P2-5 CSP（Report-Only）与 httpOnly 迁移评估；
-- P2-8 其余写操作补审计。
+- P2-8 其余写操作补审计；
+- P2-9 收紧：逐批清理 `any` 与未使用导入后，将 `format:check` 纳入 CI。
 
 ---
 

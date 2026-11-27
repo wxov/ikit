@@ -1,0 +1,8 @@
+node_modules
+dist
+tmp
+update
+dsh-browser-shots
+apps/web/src-tauri
+apps/web/android
+pnpm-lock.yaml

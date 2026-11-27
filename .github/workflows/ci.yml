@@ -32,5 +32,8 @@ jobs:
       - name: Version consistency
         run: pnpm check:versions
 
+      - name: Lint (ESLint)
+        run: pnpm lint
+
       - name: Test (node:test via tsx)
         run: pnpm test

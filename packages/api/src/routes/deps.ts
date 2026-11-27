@@ -2,7 +2,7 @@
 import type { AuditEvent } from '@ikit/shared'
 import type { EntryVisibility, Viewer } from '@ikit/core'
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 export interface ApiRouteDeps {
   /** 要求已登录：解析用户后执行 fn；未登录 401 */
   requireUser: (req: any, reply: any, fn: (user: any) => Promise<any>) => any

@@ -5,7 +5,7 @@
 // 避免拆分后各模块复制导致行为漂移。
 import type { EntryVisibility, Viewer } from '@ikit/core'
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const MAX_BATCH_IDS = 500
 
 export interface AgentCall {

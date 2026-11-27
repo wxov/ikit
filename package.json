@@ -12,7 +12,10 @@
     "build:prod": "pnpm --filter @ikit/web build && pnpm --filter @ikit/server start",
     "start": "pnpm --filter @ikit/server start",
     "test": "tsx --test \"packages/**/*.test.ts\" \"apps/**/*.test.ts\"",
-    "check:versions": "node scripts/check-versions.mjs"
+    "check:versions": "node scripts/check-versions.mjs",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "engines": {
     "node": ">=20"
@@ -23,7 +26,14 @@
     ]
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "adm-zip": "^0.6.0",
-    "tsx": "4.23.12"
+    "eslint": "^9.39.5",
+    "eslint-plugin-vue": "^10.12.1",
+    "globals": "^15.15.0",
+    "prettier": "^3.10.1",
+    "tsx": "4.23.12",
+    "typescript-eslint": "^8.74.0",
+    "vue-eslint-parser": "^10.4.2"
   }
 }
