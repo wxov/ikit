@@ -86,7 +86,26 @@ export function registerPluginStoreRoutes(app: FastifyInstance, ctx: Context, de
   )
 
   // 导入插件包（zip base64 + 可选 sha256 + 可选签名平铺字段）；仅 admin，信任边界见文档
-  app.post('/api/plugin-store/import', { bodyLimit: 5 * 1024 * 1024 }, (req, reply) =>
+  app.post(
+    '/api/plugin-store/import',
+    {
+      bodyLimit: 5 * 1024 * 1024,
+      schema: {
+        body: {
+          type: 'object',
+          required: ['data'],
+          properties: {
+            data: { type: 'string', minLength: 1 },
+            sha256: { type: 'string', maxLength: 64 },
+            signature: { type: 'string', maxLength: 4096 },
+            keyId: { type: 'string', maxLength: 128 },
+            signedHash: { type: 'string', maxLength: 64 },
+            signedAt: { type: 'string', maxLength: 64 },
+          },
+        },
+      },
+    },
+    (req, reply) =>
     requireAdmin(req, reply, async () => {
       const body = req.body as {
         data?: string
@@ -104,8 +123,10 @@ export function registerPluginStoreRoutes(app: FastifyInstance, ctx: Context, de
           // 请求体签名字段可选覆盖 zip comment（缺省时由服务端读包内 comment）
           { signature: body.signature, keyId: body.keyId, signedHash: body.signedHash, signedAt: body.signedAt },
         )
+        audit({ action: 'plugin.import', ok: true, user: await actorOf(req), ip: ipOf(req), target: body.sha256 ? body.sha256.slice(0, 16) : 'zip' })
         return { plugins, store: ctx.pluginRegistry.store(), scan, signature }
       } catch (e: any) {
+        audit({ action: 'plugin.import', ok: false, user: await actorOf(req), ip: ipOf(req), detail: { code: e?.code } })
         return reply.code(400).send({ error: e?.message || '导入失败', code: e?.code })
       }
     }),
@@ -124,6 +145,7 @@ export function registerPluginStoreRoutes(app: FastifyInstance, ctx: Context, de
       const name = (req.params as { name: string }).name
       try {
         const { plugins, scan, signature } = await ctx.pluginRegistry.update(name)
+        audit({ action: 'plugin.update', ok: true, user: await actorOf(req), ip: ipOf(req), target: name })
         return { plugins, store: ctx.pluginRegistry.store(), scan, signature }
       } catch (e: any) {
         return reply.code(400).send({ error: e?.message || '更新失败', code: e?.code })

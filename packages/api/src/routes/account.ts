@@ -95,7 +95,23 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: any, deps: ApiR
 
   // ---- 站主管理用户 ----
   app.get('/api/auth/users', (req, reply) => requireAdmin(req, reply, async () => ({ users: await ctx.account.listUsers() })))
-  app.post('/api/auth/users', (req, reply) =>
+  app.post(
+    '/api/auth/users',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['username', 'password'],
+          properties: {
+            username: { type: 'string', minLength: 1, maxLength: 64 },
+            password: { type: 'string', minLength: 6, maxLength: 128 },
+            role: { type: 'string', enum: ['user', 'admin'] },
+            groupIds: { type: 'array', items: { type: 'string' } },
+          },
+        },
+      },
+    },
+    (req, reply) =>
     requireAdmin(req, reply, async () => {
       const body = req.body as { username?: string; password?: string; role?: 'user' | 'admin'; groupIds?: string[] }
       try {
@@ -112,11 +128,16 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: any, deps: ApiR
       }
     }),
   )
-  app.post('/api/auth/users/:id/disable', (req, reply) =>
+  app.post(
+    '/api/auth/users/:id/disable',
+    { schema: { body: { type: 'object', required: ['disabled'], properties: { disabled: { type: 'boolean' } } } } },
+    (req, reply) =>
     requireAdmin(req, reply, async () => {
       const id = (req.params as { id: string }).id
       const body = req.body as { disabled?: boolean }
-      return { users: await ctx.account.disableUser(id, !!body?.disabled) }
+      const users = await ctx.account.disableUser(id, !!body?.disabled)
+      audit({ action: 'user.disable', ok: true, user: await actorOf(req), ip: ipOf(req), target: id, detail: { disabled: !!body?.disabled } })
+      return { users }
     }),
   )
   app.delete('/api/auth/users/:id', (req, reply) =>
@@ -127,21 +148,31 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: any, deps: ApiR
       return { users }
     }),
   )
-  app.post('/api/auth/users/:id/role', (req, reply) =>
+  app.post(
+    '/api/auth/users/:id/role',
+    { schema: { body: { type: 'object', required: ['role'], properties: { role: { type: 'string', enum: ['user', 'admin'] } } } } },
+    (req, reply) =>
     requireAdmin(req, reply, async () => {
       const id = (req.params as { id: string }).id
       const body = req.body as { role?: 'user' | 'admin' }
-      return { users: await ctx.account.setRole(id, body?.role === 'admin' ? 'admin' : 'user') }
+      const users = await ctx.account.setRole(id, body?.role === 'admin' ? 'admin' : 'user')
+      audit({ action: 'user.role', ok: true, user: await actorOf(req), ip: ipOf(req), target: id, detail: { role: body?.role === 'admin' ? 'admin' : 'user' } })
+      return { users }
     }),
   )
 
   // 设置用户所属组（多组）
-  app.post('/api/auth/users/:id/groups', (req, reply) =>
+  app.post(
+    '/api/auth/users/:id/groups',
+    { schema: { body: { type: 'object', properties: { groupIds: { type: 'array', items: { type: 'string' } } } } } },
+    (req, reply) =>
     requireAdmin(req, reply, async () => {
       const id = (req.params as { id: string }).id
       const body = req.body as { groupIds?: string[] }
       try {
-        return { users: await ctx.account.setUserGroups(id, body?.groupIds ?? []) }
+        const users = await ctx.account.setUserGroups(id, body?.groupIds ?? [])
+        audit({ action: 'user.groups', ok: true, user: await actorOf(req), ip: ipOf(req), target: id, detail: { groupIds: body?.groupIds ?? [] } })
+        return { users }
       } catch (e: any) {
         return reply.code(400).send({ error: e.message })
       }
@@ -152,11 +183,28 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: any, deps: ApiR
   app.get('/api/groups', (req, reply) =>
     requireAdmin(req, reply, async () => ({ groups: await ctx.account.listGroups() })),
   )
-  app.post('/api/groups', (req, reply) =>
+  app.post(
+    '/api/groups',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['name'],
+          properties: {
+            name: { type: 'string', minLength: 1, maxLength: 64 },
+            description: { type: 'string', maxLength: 500 },
+            parentId: { type: 'string', maxLength: 64 },
+          },
+        },
+      },
+    },
+    (req, reply) =>
     requireAdmin(req, reply, async () => {
       const body = req.body as { name?: string; description?: string; parentId?: string }
       try {
-        return { groups: await ctx.account.createGroup(body?.name ?? '', body?.description, body?.parentId) }
+        const groups = await ctx.account.createGroup(body?.name ?? '', body?.description, body?.parentId)
+        audit({ action: 'group.create', ok: true, user: await actorOf(req), ip: ipOf(req), target: body?.name ?? '' })
+        return { groups }
       } catch (e: any) {
         return reply.code(400).send({ error: e.message })
       }
@@ -173,12 +221,17 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: any, deps: ApiR
       }
     }),
   )
-  app.patch('/api/groups/:id', (req, reply) =>
+  app.patch(
+    '/api/groups/:id',
+    { schema: { body: { type: 'object', required: ['name'], properties: { name: { type: 'string', minLength: 1, maxLength: 64 } } } } },
+    (req, reply) =>
     requireAdmin(req, reply, async () => {
       const id = (req.params as { id: string }).id
       const body = req.body as { name?: string }
       try {
-        return { groups: await ctx.account.renameGroup(id, body?.name ?? '') }
+        const groups = await ctx.account.renameGroup(id, body?.name ?? '')
+        audit({ action: 'group.rename', ok: true, user: await actorOf(req), ip: ipOf(req), target: id, detail: { name: body?.name ?? '' } })
+        return { groups }
       } catch (e: any) {
         return reply.code(400).send({ error: e.message })
       }
@@ -188,7 +241,9 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: any, deps: ApiR
     requireAdmin(req, reply, async () => {
       const id = (req.params as { id: string }).id
       try {
-        return { groups: await ctx.account.deleteGroup(id) }
+        const groups = await ctx.account.deleteGroup(id)
+        audit({ action: 'group.delete', ok: true, user: await actorOf(req), ip: ipOf(req), target: id })
+        return { groups }
       } catch (e: any) {
         return reply.code(400).send({ error: e.message })
       }

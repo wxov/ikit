@@ -248,7 +248,7 @@ docs/         需求 / 技术 / 验收文档
 - `packages/api/src/index.ts` 新增 `setErrorHandler`：校验失败 → **400 + `code: 'E_VALIDATION'` + 可读 details**；其余错误保留 `statusCode`（5xx 记录日志、不泄露堆栈）。
 - 已加 schema 的路由（6 个）：`POST /api/auth/login`、`PUT /api/shiguang/passcode`、`POST /api/shiguang/unlock`、`POST/PATCH /api/shiguang/entries`（复用 `shiguangEntrySchema`，type 用 enum）、`POST /api/agent/tools/:name/run`、`POST /api/plugin-store/install`（`anyOf` 兼容字符串/对象入参）。
 - **验证**：`tmp/verify-schema.mjs` **10/10 PASS**（缺字段/短密码/缺 content/非法 type 均 400 `E_VALIDATION`；合法请求不受影响）。
-- 待办：其余写接口逐步补 schema（按模块推进）。
+- **扩展（2026-11-28）**：knowledge 9 处（entries 创建/更新、import、move、batch-delete、batch-move、visibility、categories、comments）、account 6 处（users 创建、disable、role、groups、groups 创建、group 重命名）、plugin-store `import`。累计 **22 个写接口** 已有 schema；扩展回归 **10/10 PASS**。
 
 ### ✅ P2-13 日志规范化（2026-11-28）
 - `@ikit/shared` 新增 `createLogger(scope)`：输出 `[ISO时间] [级别] [模块] 消息`；支持 `LOG_LEVEL=debug|info|warn|error|silent`（默认 info），非法值回退 info。
@@ -266,7 +266,8 @@ docs/         需求 / 技术 / 验收文档
   - `shiguang.passcode.set` / `shiguang.passcode.reset`
 - 记录字段：`ts / action / ok / user / ip / target / detail`。
 - **验证**：`tmp/verify-audit.mjs` **14/14 PASS**（7 类动作均落盘，记录含时间/用户/IP/目标）。
-- 待补：回收站彻底删除/清空、批量删除/移动、发布/撤回、权限与用户组变更、插件 update/import。
+- **扩展（2026-11-28）**：新增 `user.disable` / `user.role` / `user.groups` / `group.create` / `group.rename` / `group.delete` / `knowledge.batch_delete` / `knowledge.batch_move` / `knowledge.trash_purge` / `knowledge.trash_empty` / `plugin.update` / `plugin.import`（成功与失败均记录）。扩展回归 **18/18 PASS**。
+- 说明：审计为「成功路径 + 关键失败路径」记录；未覆盖：评论删除、置顶/排序等低风险操作（可按需追加）。
 
 ### 🟡 P2-10 拆分巨型文件（进行中：`routes.ts` 后端拆分基本完成，2026-11-28）
 - `packages/api/src/routes.ts`：**1648 → 265 行**（累计 **−84%**）；抽出 8 个模块：
