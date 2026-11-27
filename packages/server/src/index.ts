@@ -3,6 +3,9 @@ import { randomBytes } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { createCore } from '@ikit/core'
 import { createApi } from '@ikit/api'
+import { createLogger } from '@ikit/shared'
+
+const log = createLogger('server')
 
 // 读取当前版本（来自 packages/server/package.json）
 let APP_VERSION = '0.1.3'
@@ -40,9 +43,9 @@ function loadEnv() {
       const val = m[2].replace(/^["']|["']$/g, '')
       if (!(key in process.env)) process.env[key] = val
     }
-    console.log(`[server] loaded env from ${envFile}`)
+    log.info(`[server] loaded env from ${envFile}`)
   } catch (e) {
-    console.warn('[server] failed to load .env:', e instanceof Error ? e.message : e)
+    log.warn('[server] failed to load .env:', e instanceof Error ? e.message : e)
   }
 }
 loadEnv()
@@ -65,14 +68,14 @@ function resolveAdminPassword(): string {
   const fromEnv = (process.env.ADMIN_PASSWORD ?? '').trim()
   if (!fromEnv) {
     const generated = randomBytes(9).toString('base64url')
-    console.warn(
+    log.warn(
       '[account] 未设置 ADMIN_PASSWORD：若管理员尚不存在，将用以下随机密码创建（请登录后立即修改）：\n' +
         `[account]   ${generated}`,
     )
     return generated
   }
   if (fromEnv === 'admin123') {
-    console.warn('[account] 检测到 ADMIN_PASSWORD 为弱密码 admin123，强烈建议更换（当前按配置使用）。')
+    log.warn('[account] 检测到 ADMIN_PASSWORD 为弱密码 admin123，强烈建议更换（当前按配置使用）。')
   }
   return fromEnv
 }
@@ -142,17 +145,17 @@ async function main() {
   })
 
   await app.listen({ port: PORT, host: HOST })
-  console.log(`[server] i-kit listening on http://localhost:${PORT}`)
-  console.log(`[server] WebSocket endpoint: ws://localhost:${PORT}/ws`)
+  log.info(`[server] i-kit listening on http://localhost:${PORT}`)
+  log.info(`[server] WebSocket endpoint: ws://localhost:${PORT}/ws`)
   if (staticRoot) {
-    console.log(`[server] serving static files from: ${staticRoot}`)
+    log.info(`[server] serving static files from: ${staticRoot}`)
   }
   if (updateRoot) {
-    console.log(`[server] serving update bundles from: ${updateRoot}`)
+    log.info(`[server] serving update bundles from: ${updateRoot}`)
   }
 }
 
 main().catch((err) => {
-  console.error('[server] fatal error:', err)
+  log.error('[server] fatal error:', err)
   process.exit(1)
 })
