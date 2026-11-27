@@ -11,7 +11,8 @@
     "build": "pnpm -r --if-present build",
     "build:prod": "pnpm --filter @ikit/web build && pnpm --filter @ikit/server start",
     "start": "pnpm --filter @ikit/server start",
-    "test": "tsx --test \"packages/**/*.test.ts\" \"apps/**/*.test.ts\""
+    "test": "tsx --test \"packages/**/*.test.ts\" \"apps/**/*.test.ts\"",
+    "check:versions": "node scripts/check-versions.mjs"
   },
   "engines": {
     "node": ">=20"

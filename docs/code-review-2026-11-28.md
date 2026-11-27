@@ -239,12 +239,16 @@ docs/         需求 / 技术 / 验收文档
 ### ✅ P2-14 `store-data` 原子写（2026-11-28）
 - `store.ts` 改为 `tmp + rename`（与 `shiguang` 一致）；测试覆盖：保存可读回、无 `.tmp` 残留、损坏文件回退为空数据。
 
+### ✅ P2-12 版本号一致性校验（2026-11-28）
+- 新增 `scripts/check-versions.mjs` + `pnpm check:versions`：以**根 `package.json` version 为唯一权威**，校验 7 处（3×`package.json`、`Cargo.toml [package]`、`Cargo.lock`(ikit)、`tauri.conf.json`、Android `versionName` + `versionCode`）。
+- `versionCode` 规则固定为 `major*10000 + minor*100 + patch`（0.2.13 → 213），脚本自动推导校验。
+- 已接入 CI（`pnpm check:versions` 位于 build 之后、test 之前）；本地实测 `✓ 版本号一致：0.2.13（校验 7 处；versionCode=213）`。
+
 ### 待处理
 - P2-8 写操作审计日志；
 - P2-9 ESLint/Prettier（依赖离线不可得，待网络可用时引入）；
 - P2-10 拆分巨型文件（`routes.ts`/`App.vue`/`DocCuratorPanel.vue`/`ArticleEditView.vue`）；
 - P2-11 Fastify JSON Schema 校验 + 统一错误处理；
-- P2-12 统一版本源（7 处派生 + 一致性校验）；
 - P2-13 日志规范化（`console.log` 40 处 → 结构化 logger）；
 - P2-5 CSP（Report-Only）与 httpOnly 迁移评估。
 

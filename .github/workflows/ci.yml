@@ -29,5 +29,8 @@ jobs:
       - name: Build (tsc + vue-tsc + vite)
         run: pnpm -r --if-present build
 
+      - name: Version consistency
+        run: pnpm check:versions
+
       - name: Test (node:test via tsx)
         run: pnpm test
