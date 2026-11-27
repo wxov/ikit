@@ -10,7 +10,8 @@
     "dev:web": "pnpm --filter @ikit/web dev",
     "build": "pnpm -r --if-present build",
     "build:prod": "pnpm --filter @ikit/web build && pnpm --filter @ikit/server start",
-    "start": "pnpm --filter @ikit/server start"
+    "start": "pnpm --filter @ikit/server start",
+    "test": "tsx --test \"packages/**/*.test.ts\" \"apps/**/*.test.ts\""
   },
   "engines": {
     "node": ">=20"
@@ -21,6 +22,7 @@
     ]
   },
   "devDependencies": {
-    "adm-zip": "^0.6.0"
+    "adm-zip": "^0.6.0",
+    "tsx": "4.23.12"
   }
 }

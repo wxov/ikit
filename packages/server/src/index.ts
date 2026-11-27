@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { randomBytes } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { createCore } from '@ikit/core'
 import { createApi } from '@ikit/api'
@@ -57,6 +58,25 @@ const staticRoot = process.env.WEB_DIST ?? (existsSync(defaultDist) ? defaultDis
 const defaultUpdate = path.resolve(process.cwd(), '../../update')
 const updateRoot = existsSync(defaultUpdate) ? defaultUpdate : undefined
 
+// 初始管理员密码（P1-3，2026-11-28）：
+// - 未设置 ADMIN_PASSWORD → 生成随机密码并打印一次（仅「管理员不存在、首次 seed」时生效，不影响已有安装）；
+// - 仍为 admin123 → 保留但告警，避免用户显式设置时被意外改写。
+function resolveAdminPassword(): string {
+  const fromEnv = (process.env.ADMIN_PASSWORD ?? '').trim()
+  if (!fromEnv) {
+    const generated = randomBytes(9).toString('base64url')
+    console.warn(
+      '[account] 未设置 ADMIN_PASSWORD：若管理员尚不存在，将用以下随机密码创建（请登录后立即修改）：\n' +
+        `[account]   ${generated}`,
+    )
+    return generated
+  }
+  if (fromEnv === 'admin123') {
+    console.warn('[account] 检测到 ADMIN_PASSWORD 为弱密码 admin123，强烈建议更换（当前按配置使用）。')
+  }
+  return fromEnv
+}
+
 async function main() {
   const ctx = await createCore({
     knowledge: {
@@ -70,7 +90,7 @@ async function main() {
     account: {
       dataDir: './data',
       adminUsername: process.env.ADMIN_USERNAME ?? 'admin',
-      adminPassword: process.env.ADMIN_PASSWORD ?? 'admin123',
+      adminPassword: resolveAdminPassword(),
       smtp: {
         host: process.env.SMTP_HOST ?? '',
         port: Number(process.env.SMTP_PORT ?? 587),

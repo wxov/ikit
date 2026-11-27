@@ -217,13 +217,33 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   }
 
   // 注册已屏蔽（站主在用户管理手动建号）；保留登录/找回
+  // 登录：账号维度限流在 account 服务内（5 次失败锁 5 分钟）；此处再按 IP 维度限流（20 次失败锁 10 分钟）
+  const loginIpFails = new Map<string, { fails: number; lockedUntil: number }>()
+  const LOGIN_IP_MAX = 20
+  const LOGIN_IP_LOCK_MS = 10 * 60_000
   app.post('/api/auth/login', async (req, reply) => {
+    const ip = String((req as any).ip ?? 'unknown')
+    const now = Date.now()
+    const rec = loginIpFails.get(ip)
+    if (rec && rec.lockedUntil > now) {
+      const min = Math.max(1, Math.ceil((rec.lockedUntil - now) / 60_000))
+      return reply.code(429).send({ error: `登录尝试过于频繁，请 ${min} 分钟后再试`, code: 'E_LOGIN_LOCKED' })
+    }
     const { username, password } = (req.body ?? {}) as { username?: string; password?: string }
     try {
       const r = await ctx.account.login(username ?? '', password ?? '')
+      loginIpFails.delete(ip)
       return { token: r.token, user: r.user }
     } catch (e: any) {
-      return reply.code(401).send({ error: e.message })
+      const next = loginIpFails.get(ip) ?? { fails: 0, lockedUntil: 0 }
+      next.fails += 1
+      if (next.fails >= LOGIN_IP_MAX) {
+        next.fails = 0
+        next.lockedUntil = Date.now() + LOGIN_IP_LOCK_MS
+      }
+      loginIpFails.set(ip, next)
+      const status = e?.code === 'E_LOGIN_LOCKED' ? 429 : 401
+      return reply.code(status).send({ error: e?.message ?? '登录失败', code: e?.code })
     }
   })
 

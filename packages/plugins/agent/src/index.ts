@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { Schema } from 'cordis'
+import { safeFetchText } from '@ikit/shared'
 import type { Context } from 'cordis'
 import type { ChatMessage, LlmChatOptions, LlmService, LlmToolDefinition } from '@ikit/plugin-llm'
 import type { KnowledgeService, Viewer } from '@ikit/plugin-knowledge'
@@ -116,12 +117,10 @@ export function apply(_ctx: Context, config: Config) {
       const url = String(args.url ?? '').trim()
       if (!/^https?:\/\//i.test(url)) return '仅支持 http/https 链接'
       try {
-        const res = await fetch(url, {
-          headers: { 'user-agent': 'i-kit-agent/1.0' },
-          signal: AbortSignal.timeout(15000),
-        })
-        if (!res.ok) return `请求失败 HTTP ${res.status}`
-        const html = await res.text()
+        // 安全抓取：仅 http/https、拒绝内网/本机/链路本地（含云元数据）、逐跳校验重定向、响应体上限 1MB
+        const safe = await safeFetchText(url, { userAgent: 'i-kit-agent/1.0', timeoutMs: 15000, maxBytes: 1024 * 1024 })
+        if (!safe.ok) return `请求失败 HTTP ${safe.status}`
+        const html = safe.text
         const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1]?.trim() ?? ''
         const text = html
           .replace(/<script[\s\S]*?<\/script>/gi, ' ')
