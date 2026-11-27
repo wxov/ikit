@@ -10,7 +10,6 @@
 // 不会因为贴错公钥而误信）。公钥是公开信息，可随配置/镜像分发；私钥永不入库（.keys/ 已 gitignore）。
 import { readFileSync } from 'node:fs'
 import {
-  decodePublicKey,
   deriveKeyId,
   normalizePublicKeyPem,
   type TrustedKey,

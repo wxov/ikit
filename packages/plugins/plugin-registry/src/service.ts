@@ -12,7 +12,6 @@ import type {
   PluginRegistryService,
   PluginSource,
   PluginStoreItem,
-  PluginUninstallResult,
   RemoteRegistryPlugin,
 } from './types.js'
 import type { JsonPluginStore } from './store.js'

@@ -16,6 +16,7 @@ import { createLogger } from '@ikit/shared'
 const log = createLogger('knowledge')
 
 declare module 'cordis' {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Cordis 约定：Events 的泛型参数 C 由框架使用
   interface Events<C extends Context = Context> {
     'knowledge:changed'(payload: {
       action: 'create' | 'update' | 'remove' | 'comment' | 'comment-removed'

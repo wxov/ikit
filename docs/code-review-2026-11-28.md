@@ -321,13 +321,14 @@ docs/         需求 / 技术 / 验收文档
 - **暂不强制格式检查**（`format:check` 未入 CI）：历史代码风格未统一，全量 format 会产生巨大 diff；新增/改动文件可手动 `pnpm format`，后续逐步收紧。
 - 顺带修复的真实问题：`editorBlocks.ts` 正则多余转义、脚本稀疏数组、`mail.ts` 两处 `let → const`。
 - **收紧（2026-11-28）**：清理服务端未使用导入（`routes.ts` 5 个类型、`account.ts` 6 个 deps 解构项、`knowledge.ts` 1 个类型），warnings **36 → 24**；Vue 组件侧未使用变量保留，待 UI 回归后再清理（避免 ESLint 看不到模板动态引用导致误删）。
+- **清零（2026-11-28）**：逐个人工核对后清理剩余 24 个 warnings——服务端 18 个（core/account/knowledge/plugin-registry/shiguang/scripts 的未使用导入、`mail.ts` 的 `greeted`）、Vue 侧 6 个（`DocCuratorPanel` 无关的 `PublicUser`、`EditorSelectionToolbar` 的 `emit` 赋值、`StorePluginPanel` 的 `TITLE/props/computed`、`UserProfile` 的 `busy`、`EditorSlashMenu` 的字符偏移死代码）。**`pnpm lint` 现为 0 errors / 0 warnings**。
+  - 保留项：Cordis 约定 `interface Events<C extends Context = Context>` 的 `C` 泛型（加 `eslint-disable-next-line` 注明原因）。
 
-### 待处理
-- P2-10 其余巨型文件（前端 `App.vue` / `DocCuratorPanel.vue` / `ArticleEditView.vue`）；
-- P2-11 其余写接口补 schema；
-- P2-5 CSP（Report-Only）与 httpOnly 迁移评估；
-- P2-8 其余写操作补审计；
-- P2-9 收紧：逐批清理 `any` 与未使用导入后，将 `format:check` 纳入 CI。
+### 收尾状态（2026-11-28）
+- **P1：4/4 完成**（SSRF、登录限流、弱默认密码、CI + 最小测试）
+- **P2：12/12 完成**（lint/format、拆分巨型文件、JSON Schema（22 写接口）、统一版本源、日志规范化、原子写、审计日志 19 类动作、token 评价 + 安全头 + CSP Report-Only、KaTeX trust、迁移截止时间可配置、store-data 原子写）
+- **最终校验**：`pnpm -r build` ✅ · `pnpm lint` **0 errors / 0 warnings** ✅ · `pnpm test` **50/50** ✅ · `pnpm check:versions` 7 处一致 ✅
+- **可选后续**（不阻塞交付）：`format:check` 逐步纳入 CI（需先全量 format 或仅对改动文件）；模板级子组件抽离（`ModelConfigDialog.vue` 等）；逐批清理显式 `any`（146 处存量）；CSP 观察期后切强制模式；httpOnly Cookie 迁移评估。
 
 ---
 

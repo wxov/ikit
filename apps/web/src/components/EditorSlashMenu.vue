@@ -6,8 +6,8 @@
 //   用 `execCommand('insertText', '/')` 自己插入 —— 相比让浏览器插入，这样能保证
 //   「插入完成后立刻记录锚点」，不依赖 input 事件的先后顺序；
 // - 之后用户继续输入即成为查询串（`/h1`、`/biaoti`），菜单实时过滤；
-// - 锚点用**字符偏移**记录（`anchorOffset` = 可编辑区内 `/` 之后的字符数，0-based），
-//   因为 Vditor 会重渲染块，DOM 节点引用立刻失效；删除 `/query` 时用 `pointAtOffset` 还原 Range，
+// - 删除 `/query` 时用「块行首 → 当前光标」的 Range + execCommand('delete')，
+//   不做字符偏移还原（菜单只在空块行首触发，`/query` 必然从块首开始，可完全避开偏移解析边界）。
 //   并做「哨兵校验/长度校验」，避免误删正文；
 // - ↑/↓ 选择、Enter/Tab 确认、Esc 关闭（Esc 会删掉已输入的 `/query`）。
 //
@@ -32,51 +32,9 @@ const groups = computed(() => groupSlashCommands(items.value))
 const flat = computed(() => groups.value.flatMap((g) => g.items))
 
 /** `/` 之后的字符偏移（**可编辑区整篇**内的字符数，0-based；-1 = 未记录） */
-let anchorOffset = -1
-
-function clearAnchor() {
-  anchorOffset = -1
-}
-
 /** 把「可编辑区内的字符偏移」解析成 Range 端点 */
-function pointAtOffset(root: HTMLElement, offset: number): { node: Node; offset: number } {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  let acc = 0
-  let node = walker.nextNode()
-  let last: Node | null = null
-  while (node) {
-    const len = node.textContent?.length ?? 0
-    if (acc + len >= offset) return { node, offset: Math.max(0, Math.min(len, offset - acc)) }
-    acc += len
-    last = node
-    node = walker.nextNode()
-  }
-  return { node: last ?? root, offset: last ? (last.textContent?.length ?? 0) : 0 }
-}
-
 /** `node` 之前的字符数（可编辑区整篇） */
-function offsetOfPoint(root: HTMLElement, node: Node, nodeOffset: number): number {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-  let acc = 0
-  let cur = walker.nextNode()
-  while (cur) {
-    if (cur === node) return acc + nodeOffset
-    acc += cur.textContent?.length ?? 0
-    cur = walker.nextNode()
-  }
-  return acc
-}
-
 /** 记录 `/` 之后的字符偏移 */
-function setAnchorAfterCaret() {
-  const editable = props.bridge.editable()
-  const sel = document.getSelection()
-  if (!editable || !sel || sel.rangeCount === 0) return
-  const r = sel.getRangeAt(0).cloneRange()
-  r.collapse(true)
-  anchorOffset = offsetOfPoint(editable, r.startContainer, r.startOffset)
-}
-
 /**
  * 光标所在（或光标为整个编辑器时：第一个）顶层块。
  *
@@ -134,7 +92,6 @@ function onBeforeInput(e: InputEvent) {
   // 自己插入 `/`（而不是放行浏览器）→ 插入完成后立刻记录锚点，不依赖事件先后顺序
   e.preventDefault()
   document.execCommand('insertText', false, '/')
-  setAnchorAfterCaret()
   query.value = ''
   open.value = true
   activeIndex.value = 0
@@ -162,7 +119,6 @@ function close(keepText = false) {
   if (!open.value) return
   open.value = false
   if (!keepText) removeQueryRange()
-  clearAnchor()
   emit('close')
 }
 
@@ -189,7 +145,6 @@ function removeQueryRange() {
     range.selectNodeContents(block)
     range.setEnd(cur.endContainer, cur.endOffset)
     if (range.collapsed || range.toString().replace(/\u200b/g, '').length > 25) {
-      clearAnchor()
       return
     }
     sel.removeAllRanges()
@@ -198,7 +153,6 @@ function removeQueryRange() {
   } catch {
     /* 结构异常 → 放弃删除，只关闭菜单 */
   }
-  clearAnchor()
 }
 
 /** 浮层定位：光标相对编辑器容器的坐标 */

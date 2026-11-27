@@ -16,22 +16,9 @@ import type { Config as AccountConfig } from '@ikit/plugin-account'
 import type { Config as StoreDataConfig } from '@ikit/plugin-store-data'
 import type { Config as ShiguangConfig } from '@ikit/plugin-shiguang'
 import type { DemoService } from '@ikit/plugin-demo'
-import type {
-  EntryVisibility,
-  KnowledgeEntry,
-  KnowledgeEntryInput,
-  KnowledgeSearchResult,
-  KnowledgeService,
-  Viewer,
-  VisibilitySyncMode,
-} from '@ikit/plugin-knowledge'
+import type { EntryVisibility, KnowledgeEntryInput, KnowledgeService, Viewer, VisibilitySyncMode } from '@ikit/plugin-knowledge'
 import type { ChatMessage, LlmService, LlmModelRegistry } from '@ikit/plugin-llm'
-import type {
-  AgentRunResult,
-  AgentService,
-  AgentStep,
-  AgentTool,
-} from '@ikit/plugin-agent'
+import type { AgentService } from '@ikit/plugin-agent'
 
 // 声明 Cordis 服务类型增强
 declare module 'cordis' {

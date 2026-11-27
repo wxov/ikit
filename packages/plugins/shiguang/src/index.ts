@@ -4,7 +4,6 @@ import { Schema } from 'cordis'
 import type { Context } from 'cordis'
 import { JsonShiguangStore } from './store.js'
 import { createShiguangService } from './service.js'
-import type { ShiguangService } from './types.js'
 import { createLogger } from '@ikit/shared'
 
 const log = createLogger('shiguang')

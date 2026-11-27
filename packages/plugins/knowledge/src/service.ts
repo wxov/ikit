@@ -11,7 +11,6 @@ import type {
   KnowledgeSearchResult,
   KnowledgeService,
   Viewer,
-  VisibilitySyncMode,
 } from './types.js'
 import type { KnowledgeStore } from './store.js'
 import { createLogger } from '@ikit/shared'

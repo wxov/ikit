@@ -11,13 +11,6 @@ export interface SmtpConfig {
   from?: string
 }
 
-type Socket = import('node:net').Socket
-type TlsSocket = import('node:tls').TLSSocket
-
-interface Resolver {
-  (code: number, msg: string): void
-}
-
 export function createSmtpSender(cfg: SmtpConfig) {
   if (!cfg.host) return undefined
   const from = cfg.from || cfg.user || 'no-reply@ikit'
@@ -34,7 +27,6 @@ function sendEmail(cfg: SmtpConfig, port: number, from: string, to: string, subj
     let stage = 'greeting'
     const lines: string[] = []
     let buf = ''
-    const greeted = false
 
     const abort = (err: Error) => {
       raw.destroy()

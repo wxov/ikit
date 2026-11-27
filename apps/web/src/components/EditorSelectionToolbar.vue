@@ -22,7 +22,7 @@ const props = defineProps<{
   onDocLink?: () => void
 }>()
 
-const emit = defineEmits<{ (e: 'close'): void }>()
+defineEmits<{ (e: 'close'): void }>()
 
 const open = ref(false)
 const left = ref(0)

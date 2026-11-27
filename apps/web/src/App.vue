@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, provide } from 'vue'
 import { createSocket, api, type EventItem, type WsMessage, type WsStatus } from './lib/api'
 import { createWsConflictGate, type WsConflictState } from './lib/wsConflict'
-import { getToken, setToken, logout, currentUser, authHeaders, type PublicUser } from './lib/auth'
+import { getToken, setToken, logout, currentUser, authHeaders } from './lib/auth'
 import { startDesktopNode } from './lib/agentNode'
 import { useAppShell } from './composables/useAppShell'
 import {

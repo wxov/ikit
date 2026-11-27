@@ -5,6 +5,7 @@ import { createLogger } from '@ikit/shared'
 const log = createLogger('demo')
 
 declare module 'cordis' {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Cordis 约定：Events 的泛型参数 C 由框架使用
   interface Events<C extends Context = Context> {
     'demo:greeted'(payload: { name: string; message: string; count: number }): void
   }
