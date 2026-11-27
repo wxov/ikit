@@ -244,12 +244,23 @@ docs/         需求 / 技术 / 验收文档
 - `versionCode` 规则固定为 `major*10000 + minor*100 + patch`（0.2.13 → 213），脚本自动推导校验。
 - 已接入 CI（`pnpm check:versions` 位于 build 之后、test 之前）；本地实测 `✓ 版本号一致：0.2.13（校验 7 处；versionCode=213）`。
 
+### ✅ P2-11 Fastify JSON Schema 校验 + 统一错误处理（2026-11-28）
+- `packages/api/src/index.ts` 新增 `setErrorHandler`：校验失败 → **400 + `code: 'E_VALIDATION'` + 可读 details**；其余错误保留 `statusCode`（5xx 记录日志、不泄露堆栈）。
+- 已加 schema 的路由（6 个）：`POST /api/auth/login`、`PUT /api/shiguang/passcode`、`POST /api/shiguang/unlock`、`POST/PATCH /api/shiguang/entries`（复用 `shiguangEntrySchema`，type 用 enum）、`POST /api/agent/tools/:name/run`、`POST /api/plugin-store/install`（`anyOf` 兼容字符串/对象入参）。
+- **验证**：`tmp/verify-schema.mjs` **10/10 PASS**（缺字段/短密码/缺 content/非法 type 均 400 `E_VALIDATION`；合法请求不受影响）。
+- 待办：其余写接口逐步补 schema（按模块推进）。
+
+### ✅ P2-13 日志规范化（2026-11-28）
+- `@ikit/shared` 新增 `createLogger(scope)`：输出 `[ISO时间] [级别] [模块] 消息`；支持 `LOG_LEVEL=debug|info|warn|error|silent`（默认 info），非法值回退 info。
+- **迁移 16 个文件、78 处 `console.*` → `log.info/warn/error`**（packages 服务端源码中除 logger 自身外已无 `console.*`）；新增 `@ikit/shared` 依赖：plugin-registry / knowledge / llm / account / shiguang / demo / server / api。
+- 新增 4 个测试（阈值过滤、silent、非法值回退、输出格式）。
+- **验证**：`LOG_LEVEL=warn` 启动临时实例 → **info 行 0 条、warn 行正常输出**；`pnpm test` 39/39。
+
 ### 待处理
 - P2-8 写操作审计日志；
 - P2-9 ESLint/Prettier（依赖离线不可得，待网络可用时引入）；
 - P2-10 拆分巨型文件（`routes.ts`/`App.vue`/`DocCuratorPanel.vue`/`ArticleEditView.vue`）；
-- P2-11 Fastify JSON Schema 校验 + 统一错误处理；
-- P2-13 日志规范化（`console.log` 40 处 → 结构化 logger）；
+- P2-11 其余写接口补 schema；
 - P2-5 CSP（Report-Only）与 httpOnly 迁移评估。
 
 ---

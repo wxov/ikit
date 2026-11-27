@@ -5,7 +5,10 @@ import fastifyStatic from '@fastify/static'
 import type { WebSocket } from 'ws'
 import type { Context } from 'cordis'
 import { createBus } from './bus.js'
+import { createLogger } from '@ikit/shared'
 import { registerRoutes, type ApiMeta } from './routes.js'
+
+const log = createLogger('api')
 
 export type { ApiMeta }
 
@@ -46,6 +49,20 @@ export async function createApi(ctx: Context, meta: ApiMeta = {}): Promise<Fasti
         .send(`403 Forbidden：域名 "${host || '(空)'}" 不在允许列表（允许：${allowedText}）`)
     })
   }
+
+  // ---- 统一错误处理（P2-11，2026-11-28）----
+  // schema 校验失败 → 400 + 可读 details；其余错误保留 statusCode（5xx 记录日志，不向客户端泄露堆栈）
+  app.setErrorHandler((err: any, _req, reply) => {
+    if (err?.validation) {
+      const details = (err.validation as Array<{ instancePath?: string; message?: string }>)
+        .map((v) => `${v.instancePath || '(root)'} ${v.message ?? ''}`.trim())
+        .join('; ')
+      return reply.code(400).send({ error: `参数校验失败：${details}`, code: 'E_VALIDATION' })
+    }
+    const status = typeof err?.statusCode === 'number' && err.statusCode >= 400 ? err.statusCode : 500
+    if (status >= 500) log.error('[api] unhandled error:', err)
+    return reply.code(status).send({ error: err?.message ?? '服务器错误', code: err?.code })
+  })
 
   // ---- 安全响应头（P2-5 加固，2026-11-28）----
   // 说明：token 仍存 localStorage（三端 + WS 鉴权 + 无 CSRF 负担），故以「降低 XSS 影响面」为重点：

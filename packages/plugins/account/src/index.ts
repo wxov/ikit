@@ -5,6 +5,9 @@ import { mkdirSync } from 'node:fs'
 import { JsonAccountStore } from './store.js'
 import { createAccount } from './service.js'
 import { createSmtpSender, type SmtpConfig } from './mail.js'
+import { createLogger } from '@ikit/shared'
+
+const log = createLogger('account')
 
 declare module 'cordis' {
   interface Context {
@@ -42,10 +45,10 @@ export function apply(ctx: Context, config: Config) {
 
   void account.seedAdmin(config.adminUsername || 'admin', config.adminPassword || 'admin123')
 
-  console.log('[account] plugin started')
-  if (!emailSender) console.log('[account] SMTP 未配置，密码找回将降级返回重置码')
+  log.info('[account] plugin started')
+  if (!emailSender) log.info('[account] SMTP 未配置，密码找回将降级返回重置码')
   ctx.on('dispose', () => {
-    console.log('[account] plugin disposed')
+    log.info('[account] plugin disposed')
   })
 }
 

@@ -10,7 +10,8 @@
   "dependencies": {
     "@ikit/api": "workspace:*",
     "@ikit/core": "workspace:*",
-    "cordis": "^3.18.1"
+    "cordis": "^3.18.1",
+    "@ikit/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -87,6 +87,9 @@ importers:
       '@ikit/core':
         specifier: workspace:*
         version: link:../core
+      '@ikit/shared':
+        specifier: workspace:*
+        version: link:../shared
       cordis:
         specifier: ^3.18.1
         version: 3.18.1
@@ -143,6 +146,9 @@ importers:
 
   packages/plugins/account:
     dependencies:
+      '@ikit/shared':
+        specifier: workspace:*
+        version: link:../../shared
       cordis:
         specifier: ^3.18.1
         version: 3.18.1
@@ -178,6 +184,9 @@ importers:
 
   packages/plugins/demo:
     dependencies:
+      '@ikit/shared':
+        specifier: workspace:*
+        version: link:../../shared
       cordis:
         specifier: ^3.18.1
         version: 3.18.1
@@ -191,6 +200,9 @@ importers:
 
   packages/plugins/knowledge:
     dependencies:
+      '@ikit/shared':
+        specifier: workspace:*
+        version: link:../../shared
       cordis:
         specifier: ^3.18.1
         version: 3.18.1
@@ -210,6 +222,9 @@ importers:
 
   packages/plugins/llm:
     dependencies:
+      '@ikit/shared':
+        specifier: workspace:*
+        version: link:../../shared
       cordis:
         specifier: ^3.18.1
         version: 3.18.1
@@ -223,6 +238,9 @@ importers:
 
   packages/plugins/plugin-registry:
     dependencies:
+      '@ikit/shared':
+        specifier: workspace:*
+        version: link:../../shared
       adm-zip:
         specifier: 0.6.0
         version: 0.6.0
@@ -239,6 +257,9 @@ importers:
 
   packages/plugins/shiguang:
     dependencies:
+      '@ikit/shared':
+        specifier: workspace:*
+        version: link:../../shared
       cordis:
         specifier: ^3.18.1
         version: 3.18.1
@@ -274,6 +295,9 @@ importers:
       '@ikit/core':
         specifier: workspace:*
         version: link:../core
+      '@ikit/shared':
+        specifier: workspace:*
+        version: link:../shared
       cordis:
         specifier: ^3.18.1
         version: 3.18.1

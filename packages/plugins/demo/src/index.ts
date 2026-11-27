@@ -1,5 +1,8 @@
 import { Schema } from 'cordis'
 import type { Context } from 'cordis'
+import { createLogger } from '@ikit/shared'
+
+const log = createLogger('demo')
 
 declare module 'cordis' {
   interface Events<C extends Context = Context> {
@@ -40,10 +43,10 @@ export function apply(ctx: Context, config: Config) {
 
   ctx.set('demo', service)
   ctx.on('dispose', () => {
-    console.log('[demo] plugin disposed')
+    log.info('[demo] plugin disposed')
   })
 
-  console.log(`[demo] plugin started, greeting = "${greeting}"`)
+  log.info(`[demo] plugin started, greeting = "${greeting}"`)
 }
 
 export default { name, apply, Config }

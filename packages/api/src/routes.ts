@@ -221,7 +221,21 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   const loginIpFails = new Map<string, { fails: number; lockedUntil: number }>()
   const LOGIN_IP_MAX = 20
   const LOGIN_IP_LOCK_MS = 10 * 60_000
-  app.post('/api/auth/login', async (req, reply) => {
+  app.post(
+    '/api/auth/login',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['username', 'password'],
+          properties: {
+            username: { type: 'string', minLength: 1, maxLength: 64 },
+            password: { type: 'string', minLength: 1, maxLength: 256 },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
     const ip = String((req as any).ip ?? 'unknown')
     const now = Date.now()
     const rec = loginIpFails.get(ip)
@@ -458,7 +472,26 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     return { store }
   })
 
-  app.post('/api/plugin-store/install', (req, reply) =>
+  app.post(
+    '/api/plugin-store/install',
+    {
+      schema: {
+        body: {
+          anyOf: [
+            { type: 'string', minLength: 1, maxLength: 100 },
+            {
+              type: 'object',
+              properties: {
+                name: { type: 'string', maxLength: 100 },
+                packageUrl: { type: 'string', maxLength: 2048 },
+                sha256: { type: 'string', maxLength: 64 },
+              },
+            },
+          ],
+        },
+      },
+    },
+    (req, reply) =>
     requireAdmin(req, reply, async () => {
       // 支持 { name }（沿用商店条目，catalog 假安装 / remote 真下载）或 { name, packageUrl, sha256 }（直接远端安装）
       // 可选签名字段（signature/keyId/signedHash/signedAt）优先于包内 zip comment
@@ -642,7 +675,21 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     requireUser(req, reply, async () => ctx.shiguang.status()),
   )
 
-  app.put('/api/shiguang/passcode', (req, reply) =>
+  app.put(
+    '/api/shiguang/passcode',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['newPasscode'],
+          properties: {
+            newPasscode: { type: 'string', minLength: 4, maxLength: 32 },
+            oldPasscode: { type: 'string', maxLength: 64 },
+          },
+        },
+      },
+    },
+    (req, reply) =>
     requireUser(req, reply, async () => {
       const body = (req.body ?? {}) as { oldPasscode?: string; newPasscode?: string }
       try {
@@ -663,7 +710,18 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     }),
   )
 
-  app.post('/api/shiguang/unlock', (req, reply) =>
+  app.post(
+    '/api/shiguang/unlock',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['passcode'],
+          properties: { passcode: { type: 'string', minLength: 1, maxLength: 64 } },
+        },
+      },
+    },
+    (req, reply) =>
     requireUser(req, reply, async () => {
       const { passcode } = (req.body ?? {}) as { passcode?: string }
       try {
@@ -690,7 +748,22 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     }),
   )
 
-  app.post('/api/shiguang/entries', (req, reply) =>
+  const shiguangEntrySchema = {
+    type: 'object',
+    properties: {
+      type: { type: 'string', enum: ['diary', 'insight', 'quote'] },
+      content: { type: 'string', minLength: 1, maxLength: 20000 },
+      date: { type: 'string', maxLength: 10 },
+      title: { type: 'string', maxLength: 200 },
+      author: { type: 'string', maxLength: 100 },
+      tags: { type: 'array', maxItems: 12, items: { type: 'string', maxLength: 30 } },
+    },
+  } as const
+
+  app.post(
+    '/api/shiguang/entries',
+    { schema: { body: { ...shiguangEntrySchema, required: ['type', 'content'] } } },
+    (req, reply) =>
     requireUser(req, reply, async () => {
       if (!requireUnlock(req, reply)) return
       const body = (req.body ?? {}) as Record<string, unknown>
@@ -703,7 +776,10 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     }),
   )
 
-  app.patch('/api/shiguang/entries/:id', (req, reply) =>
+  app.patch(
+    '/api/shiguang/entries/:id',
+    { schema: { body: shiguangEntrySchema } },
+    (req, reply) =>
     requireUser(req, reply, async () => {
       if (!requireUnlock(req, reply)) return
       const id = (req.params as { id: string }).id
@@ -1152,7 +1228,17 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   )
 
   // 执行一个服务端工具（节点本地 agent 循环复用服务端工具时调用；登录鉴权）
-  app.post('/api/agent/tools/:name/run', (req, reply) =>
+  app.post(
+    '/api/agent/tools/:name/run',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          properties: { args: { type: 'object' } },
+        },
+      },
+    },
+    (req, reply) =>
     requireUser(req, reply, async (user) => {
       const name = (req.params as { name: string }).name
       const body = req.body as { args?: Record<string, unknown> }

@@ -3,6 +3,9 @@ import { randomBytes, randomUUID, scrypt as _scrypt, timingSafeEqual } from 'nod
 import { promisify } from 'node:util'
 import type { AccountService, Group, PublicUser, User, UserRole } from './types.js'
 import type { JsonAccountStore } from './store.js'
+import { createLogger } from '@ikit/shared'
+
+const log = createLogger('account/service')
 
 export type EmailSender = (to: string, subject: string, html: string) => Promise<void>
 
@@ -198,7 +201,7 @@ export function createAccount(
           )
           return { sent: true }
         } catch (e) {
-          console.warn('[account] reset email failed:', e instanceof Error ? e.message : e)
+          log.warn('[account] reset email failed:', e instanceof Error ? e.message : e)
           return { sent: false, resetToken }
         }
       }

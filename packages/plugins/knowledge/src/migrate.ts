@@ -1,6 +1,9 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { KnowledgeStore } from './store.js'
+import { createLogger } from '@ikit/shared'
+
+const log = createLogger('knowledge/migrate')
 
 /**
  * 存量草稿一次性发布迁移（完善⑦）。
@@ -119,7 +122,7 @@ export async function migrateLegacyDrafts(
       backup = backupFile
     } catch (e) {
       // 备份失败 → 中止迁移（不冒险改数据）
-      console.warn(
+      log.warn(
         '[knowledge] draft-publish migration aborted (backup failed):',
         e instanceof Error ? e.message : e,
       )

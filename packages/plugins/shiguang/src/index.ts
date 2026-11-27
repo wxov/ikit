@@ -5,6 +5,9 @@ import type { Context } from 'cordis'
 import { JsonShiguangStore } from './store.js'
 import { createShiguangService } from './service.js'
 import type { ShiguangService } from './types.js'
+import { createLogger } from '@ikit/shared'
+
+const log = createLogger('shiguang')
 
 export const name = 'shiguang'
 
@@ -28,9 +31,9 @@ export function apply(ctx: Context, config: Config) {
   const store = new JsonShiguangStore(dataFile)
   const service = createShiguangService(store, { tokenTtlMs: config.tokenTtlMs })
   ctx.set('shiguang', service)
-  console.log(`[shiguang] plugin started (file=${dataFile})`)
+  log.info(`[shiguang] plugin started (file=${dataFile})`)
   ctx.on('dispose', () => {
-    console.log('[shiguang] plugin disposed')
+    log.info('[shiguang] plugin disposed')
   })
 }
 
