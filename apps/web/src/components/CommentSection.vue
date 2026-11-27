@@ -2,6 +2,7 @@
 import { ref, computed, watch, inject, type Ref } from 'vue'
 import { api, type KnowledgeComment } from '../lib/api'
 import { authHeaders } from '../lib/auth'
+import ConfirmDialog from './ConfirmDialog.vue'
 
 const props = defineProps<{ entryId?: string }>()
 const emit = defineEmits<{ (e: 'changed'): void }>()
@@ -50,8 +51,17 @@ async function add() {
   }
 }
 
-async function del(c: KnowledgeComment) {
-  if (!confirm(`删除这条评论？`)) return
+// 删除评论确认（2026-11-28）：应用内弹窗替代 window.confirm
+const confirmDelete = ref<KnowledgeComment | null>(null)
+
+function askDel(c: KnowledgeComment) {
+  confirmDelete.value = c
+}
+
+async function del() {
+  const c = confirmDelete.value
+  if (!c) return
+  confirmDelete.value = null
   try {
     await api(`/api/knowledge/comments/${c.id}`, { method: 'DELETE', headers: authHeaders() })
     emit('changed')
@@ -102,7 +112,7 @@ watch(
           </div>
           <div class="cmt-content">{{ c.content }}</div>
         </div>
-        <button v-if="canDelete(c)" class="cmt-del" title="删除" @click="del(c)">×</button>
+        <button v-if="canDelete(c)" class="cmt-del" title="删除" @click="askDel(c)">×</button>
       </div>
     </div>
     <div v-else class="cmt-empty">暂无评论，来抢沙发～</div>
@@ -112,6 +122,17 @@ watch(
       <button class="cmt-btn" :disabled="busy || !text.trim()" @click="add">{{ busy ? '提交中…' : '发表评论' }}</button>
     </div>
     <div v-else class="cmt-login">登录后可发表评论</div>
+
+    <!-- 删除评论确认：应用内弹窗 -->
+    <ConfirmDialog
+      :open="!!confirmDelete"
+      title="删除评论"
+      message="删除后不可恢复，确定删除这条评论？"
+      confirm-text="删除"
+      danger
+      @confirm="del"
+      @cancel="confirmDelete = null"
+    />
   </div>
 </template>
 

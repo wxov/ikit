@@ -38,6 +38,7 @@ import {
 } from '../lib/docLinks'
 import { docIndex, refreshDocIndex } from '../lib/docIndex'
 import VditorEditor from './VditorEditor.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 import DocToc, { type TocItem } from './DocToc.vue'
 
 const props = withDefaults(
@@ -814,9 +815,17 @@ async function togglePublish() {
   }
 }
 
+// 删除文章确认（2026-11-28）：应用内弹窗替代 window.confirm（webview 屏蔽原生 confirm）
+const confirmRemove = ref(false)
+
+function askRemove() {
+  if (!entryId.value || busy.value) return
+  confirmRemove.value = true
+}
+
 async function remove() {
   if (!entryId.value || busy.value) return
-  if (!confirm(`确认删除「${title.value || '未命名草稿'}」？此操作将移入回收站。`)) return
+  confirmRemove.value = false
   busy.value = true
   inlineError.value = ''
   try {
@@ -944,7 +953,7 @@ defineExpose({
       </span>
       <span class="ad-spacer" />
       <span class="ad-edit-hint" :class="{ 'is-hidden': shellActive }">✎ 点击正文即可编辑</span>
-      <button v-if="entryId" class="ad-btn danger-ghost" :disabled="busy" @click="remove">🗑 删除</button>
+      <button v-if="entryId" class="ad-btn danger-ghost" :disabled="busy" @click="askRemove">🗑 删除</button>
       <button class="ad-btn primary" :disabled="publishing" @click="togglePublish">
         {{ publishing ? '处理中…' : isDraft ? '发布' : '撤回' }}
       </button>
@@ -1082,6 +1091,18 @@ defineExpose({
         <span class="ad-hint ad-hint-link" :title="LINK_HINT">互链 <code>[[ ]]</code> ⓘ</span>
       </div>
     </div>
+
+    <!-- 删除文章确认：应用内弹窗（替代 window.confirm） -->
+    <ConfirmDialog
+      :open="confirmRemove"
+      title="删除文章"
+      :message="`确认删除「${title || '未命名草稿'}」？文章将移入回收站（可恢复）。`"
+      confirm-text="移入回收站"
+      danger
+      :busy="busy"
+      @confirm="remove"
+      @cancel="confirmRemove = false"
+    />
   </section>
 </template>
 
