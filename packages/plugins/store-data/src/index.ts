@@ -4,6 +4,9 @@ import path from 'node:path'
 import { mkdirSync } from 'node:fs'
 import { JsonStoreData } from './store.js'
 import { createStoreData } from './service.js'
+import { createLogger } from '@ikit/shared'
+
+const log = createLogger('store-data')
 
 declare module 'cordis' {
   interface Context {
@@ -27,9 +30,9 @@ export function apply(ctx: Context, config: Config) {
   const store = new JsonStoreData(path.join(dataDir, 'store-data.json'))
   const service = createStoreData(ctx, store)
   ctx.set('storeData', service)
-  console.log('[store-data] plugin started')
+  log.info('[store-data] plugin started')
   ctx.on('dispose', () => {
-    console.log('[store-data] plugin disposed')
+    log.info('[store-data] plugin disposed')
   })
 }
 

@@ -175,7 +175,7 @@ export function splitBlocks(markdown: string): EditorBlock[] {
     // 3) 其余块：首行确定类型，后续行按 endsCurrentBlock 决定去留
     type = blockTypeOf(lines[i])
     // 列表作用域 / 家族：更深缩进的同类列表行是它的子级 → 留在本块（与 Lute 输出的 `<ul>` 嵌套结构一致）
-    let scope = type === 'list' || type === 'ordered-list' || type === 'task' ? listIndentOf(lines[start]) : -1
+    const scope = type === 'list' || type === 'ordered-list' || type === 'task' ? listIndentOf(lines[start]) : -1
     const family = listFamilyOf(lines[start])
     while (i < lines.length) {
       const line = lines[i]
@@ -614,7 +614,7 @@ export function isBlankBlockText(text: string): boolean {
 /** 块在文档中的展示名（块菜单标题） */
 export function blockLabel(md: string): string {
   const t = blockTypeOf(md)
-  const text = firstLine(md).replace(/^[\s>#*+\-]+/, '').trim()
+  const text = firstLine(md).replace(/^[\s>#*+-]+/, '').trim()
   const names: Record<EditorBlockType, string> = {
     paragraph: '正文',
     heading: '标题',

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 import {
   fetchPluginStore,
   fetchPluginCategories,
@@ -84,8 +85,25 @@ function verdictCls(v: SignatureVerdict | undefined): string {
   return v?.status === 'verified' ? 'verified' : v?.status === 'unsigned' || v?.status === 'unverified' ? 'unsigned' : 'invalid'
 }
 
+// 通用应用内确认（2026-11-28）：桌面/移动 webview 会屏蔽 window.confirm → 统一改用站内弹窗
+const pendingConfirm = ref<{ title: string; message: string; danger?: boolean; resolve: (v: boolean) => void } | null>(
+  null,
+)
+
+function askConfirm(opts: { title: string; message: string; danger?: boolean }): Promise<boolean> {
+  return new Promise((resolve) => {
+    pendingConfirm.value = { ...opts, resolve }
+  })
+}
+
+function resolveConfirm(v: boolean) {
+  const p = pendingConfirm.value
+  pendingConfirm.value = null
+  p?.resolve(v)
+}
+
 /** warn 模式下的安装前二次确认（enforce 由后端 installable=false 直接禁用按钮） */
-function confirmRisk(p: PluginStoreItem): boolean {
+async function confirmRisk(p: PluginStoreItem): Promise<boolean> {
   if (sigMode.value !== 'warn') return true
   const s = p.signatureStatus
   if (s !== 'unsigned' && s !== 'invalid' && s !== 'unknown-key') return true
@@ -95,9 +113,11 @@ function confirmRisk(p: PluginStoreItem): boolean {
       : s === 'unknown-key'
         ? '该包签名密钥未受信任'
         : '该包验签未通过'
-  return confirm(
-    `${why}（当前策略 PLUGIN_SIGNATURE_MODE=warn，仅提示不拒装）。\n\n缺少签名意味着无法确认包的来源与完整性（防篡改能力缺失）。\n\n仍要继续安装「${p.title}」吗？`,
-  )
+  return askConfirm({
+    title: '安全提示：插件未签名',
+    message: `${why}（当前策略 PLUGIN_SIGNATURE_MODE=warn，仅提示不拒装）。\n\n缺少签名意味着无法确认包的来源与完整性（防篡改能力缺失）。\n\n仍要继续安装「${p.title}」吗？`,
+    danger: true,
+  })
 }
 
 function sourceLabel(p: PluginStoreItem): string {
@@ -136,7 +156,7 @@ async function load() {
 }
 
 async function install(p: PluginStoreItem) {
-  if (!confirmRisk(p)) return
+  if (!(await confirmRisk(p))) return
   busy.value = p.name
   error.value = ''
   notice.value = ''
@@ -160,7 +180,7 @@ async function install(p: PluginStoreItem) {
 }
 
 async function doUpdate(p: PluginStoreItem) {
-  if (!confirmRisk(p)) return
+  if (!(await confirmRisk(p))) return
   busy.value = p.name
   error.value = ''
   notice.value = ''
@@ -229,13 +249,13 @@ async function onImportFile(ev: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
-  // D5：仅 admin + 二次确认 + 风险提示
-  if (
-    !confirm(
-      `即将导入插件包「${file.name}」。\n\n风险提示：第三方插件将获得与主程序同等的系统权限，仅安装你信任的来源。\n\n本次导入未提供 sha256：未做完整性校验（本地导入按「受信任的人工动作」处理）。\n\n导入包需自带签名（zip 内签名信息，或请求体签名参数）才能在 enforce 策略下通过校验；未签名的包在 warn 策略下可安装但会标记为「未签名」。\n\n继续导入？`,
-    )
-  )
-    return
+  // D5：仅 admin + 二次确认 + 风险提示（应用内弹窗）
+  const ok = await askConfirm({
+    title: '导入插件包',
+    message: `即将导入插件包「${file.name}」。\n\n风险提示：第三方插件将获得与主程序同等的系统权限，仅安装你信任的来源。\n\n本次导入未提供 sha256：未做完整性校验（本地导入按「受信任的人工动作」处理）。\n\n导入包需自带签名（zip 内签名信息，或请求体签名参数）才能在 enforce 策略下通过校验；未签名的包在 warn 策略下可安装但会标记为「未签名」。\n\n继续导入？`,
+    danger: true,
+  })
+  if (!ok) return
   if (file.size > 3 * 1024 * 1024) {
     error.value = '插件包超过 2MB 限制'
     return
@@ -523,6 +543,15 @@ onMounted(load)
       </div>
     </div>
 
+    <!-- 通用确认（安装风险 / 导入风险）：应用内弹窗 -->
+    <ConfirmDialog
+      :open="!!pendingConfirm"
+      :title="pendingConfirm?.title ?? ''"
+      :message="pendingConfirm?.message ?? ''"
+      :danger="!!pendingConfirm?.danger"
+      @confirm="resolveConfirm(true)"
+      @cancel="resolveConfirm(false)"
+    />
     <!-- 卸载确认：应用内弹窗（替代 window.confirm） -->
     <Teleport to="body">
       <div v-if="uninstallFor" class="ps-modal-mask" @click.self="uninstallFor = null">

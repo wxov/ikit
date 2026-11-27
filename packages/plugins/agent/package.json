@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@ikit/shared": "workspace:*",
     "cordis": "^3.18.1"
   },
   "devDependencies": {

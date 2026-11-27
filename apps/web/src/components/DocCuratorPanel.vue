@@ -6,17 +6,8 @@ import { apiUrl } from '../lib/config'
 import { authHeaders } from '../lib/auth'
 import type { PublicUser } from '../lib/auth'
 import { renderMarkdown } from '../lib/markdown'
-import { listModels, saveModels, fetchModelList, type LlmModelPublic, type LlmProviderPublic } from '../lib/llm'
+import { useAgentModels, compositeOf, type AgentSession } from '../composables/useAgentModels'
 
-interface AgentSession {
-  id: string
-  ownerId?: string
-  title: string
-  /** 该会话选用的模型（llm 模型清单记录 id；缺省 = 默认模型） */
-  model?: string
-  createdAt: string
-  updatedAt: string
-}
 interface AgentMessage {
   id: string
   sessionId: string
@@ -64,239 +55,39 @@ const renameInput = ref('')
 const chatEl = ref<HTMLElement | null>(null)
 let abortController: AbortController | null = null
 
-// ---- 模型选择（2026-11-22）：按会话记忆；非站主只看到「对普通用户可见」的模型 ----
-const models = ref<LlmModelPublic[]>([])
-const defaultModelId = ref('')
-const selectedModel = ref('')
-const modelsError = ref('')
-
-async function loadModels() {
-  if (!loggedIn.value) return
-  try {
-    const r = await listModels()
-    models.value = r.models
-    defaultModelId.value = r.defaultId || r.models[0]?.id || ''
-    // 当前选中模型若已失效（被删除/无权），回落到默认
-    if (!models.value.some((m) => m.id === selectedModel.value)) {
-      const cur = sessions.value.find((s) => s.id === currentId.value)?.model
-      selectedModel.value = models.value.some((m) => m.id === cur) ? (cur as string) : defaultModelId.value
-    }
-    modelsError.value = ''
-  } catch (e: any) {
-    modelsError.value = e?.message ?? String(e)
-  }
-}
-
-/** 切换会话/新建后，回显该会话记住的模型（缺省用默认模型） */
-function syncModelFromSession() {
-  const cur = sessions.value.find((s) => s.id === currentId.value)?.model
-  selectedModel.value = cur && models.value.some((m) => m.id === cur) ? cur : defaultModelId.value
-}
-
-// ---- 模型配置（站主，在小知面板内）：按「供应商」分组（参考 CC Switch）----
+// ---- 模型选择 / 模型配置（P2-10）：逻辑抽到 composables/useAgentModels.ts ----
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
+const {
+  models,
+  defaultModelId,
+  selectedModel,
+  modelsError,
+  loadModels,
+  syncModelFromSession,
+  configOpen,
+  configProviders,
+  configDefaultId,
+  configLoading,
+  configSaving,
+  configNotice,
+  fetchOpen,
+  fetchProviderIdx,
+  fetchLoading,
+  fetchError,
+  fetchManual,
+  fetchList,
+  openModelConfig,
+  addProvider,
+  removeProvider,
+  addModel,
+  removeModel,
+  openFetch,
+  doFetch,
+  toggleAllFetch,
+  applyFetch,
+  saveModelConfig,
+} = useAgentModels({ loggedIn, isAdmin, sessions, currentId })
 
-interface ModelRow {
-  key: string
-  name: string
-  model: string
-  visibleToUsers: boolean
-}
-interface ProviderRow {
-  id: string
-  name: string
-  apiBase: string
-  apiKey: string
-  keyMask: string
-  hasKey: boolean
-  models: ModelRow[]
-}
-
-const configOpen = ref(false)
-const configProviders = ref<ProviderRow[]>([])
-const configDefaultId = ref('')
-const configLoading = ref(false)
-const configSaving = ref(false)
-const configNotice = ref('')
-
-// 「一键获取模型列表」弹层
-const fetchOpen = ref(false)
-const fetchProviderIdx = ref(-1)
-const fetchLoading = ref(false)
-const fetchError = ref('')
-const fetchManual = ref('')
-interface FetchRow {
-  id: string
-  name: string
-  exists: boolean
-  checked: boolean
-}
-const fetchList = ref<FetchRow[]>([])
-
-function compositeOf(p: ProviderRow, m: ModelRow): string {
-  return `${p.id || 'new'}/${m.key || m.model}`
-}
-
-function providersFrom(list: LlmProviderPublic[]): ProviderRow[] {
-  return list.map((p) => ({
-    id: p.id,
-    name: p.name,
-    apiBase: p.apiBase,
-    apiKey: '',
-    keyMask: p.keyMask,
-    hasKey: p.hasKey,
-    models: p.models.map((m) => ({
-      key: m.id.startsWith(p.id + '/') ? m.id.slice(p.id.length + 1) : m.id,
-      name: m.name,
-      model: m.model,
-      visibleToUsers: m.visibleToUsers,
-    })),
-  }))
-}
-
-/** 打开模型配置弹窗（站主）：读取当前清单 */
-async function openModelConfig() {
-  configOpen.value = true
-  configLoading.value = true
-  configNotice.value = ''
-  modelsError.value = ''
-  try {
-    const r = await listModels()
-    configProviders.value = providersFrom(r.providers)
-    configDefaultId.value = r.defaultId || ''
-  } catch (e: any) {
-    modelsError.value = e?.message ?? String(e)
-  } finally {
-    configLoading.value = false
-  }
-}
-
-function addProvider() {
-  configProviders.value.push({
-    id: '',
-    name: '',
-    apiBase: '',
-    apiKey: '',
-    keyMask: '',
-    hasKey: false,
-    models: [{ key: '', name: '', model: '', visibleToUsers: true }],
-  })
-}
-
-function removeProvider(i: number) {
-  configProviders.value.splice(i, 1)
-  const flat = configProviders.value.flatMap((p) => p.models.map((m) => compositeOf(p, m)))
-  if (!flat.includes(configDefaultId.value)) configDefaultId.value = flat[0] ?? ''
-}
-
-function addModel(pi: number) {
-  configProviders.value[pi].models.push({ key: '', name: '', model: '', visibleToUsers: true })
-}
-
-function removeModel(pi: number, mi: number) {
-  const p = configProviders.value[pi]
-  const removed = compositeOf(p, p.models[mi])
-  p.models.splice(mi, 1)
-  if (configDefaultId.value === removed) {
-    const flat = configProviders.value.flatMap((x) => x.models.map((m) => compositeOf(x, m)))
-    configDefaultId.value = flat[0] ?? ''
-  }
-}
-
-/** 打开「一键获取模型列表」 */
-function openFetch(pi: number) {
-  fetchProviderIdx.value = pi
-  fetchOpen.value = true
-  fetchError.value = ''
-  fetchManual.value = ''
-  fetchList.value = []
-}
-
-/** 调用后端代理 GET {apiBase}/models（用该供应商填写的密钥，或已保存的密钥） */
-async function doFetch() {
-  const p = configProviders.value[fetchProviderIdx.value]
-  if (!p) return
-  fetchLoading.value = true
-  fetchError.value = ''
-  try {
-    const r = await fetchModelList({
-      apiBase: p.apiBase.trim(),
-      apiKey: p.apiKey.trim() || undefined,
-      providerId: p.id || undefined,
-    })
-    fetchList.value = r.models.map((m) => {
-      const exists = p.models.some((x) => x.model === m.id)
-      return { id: m.id, name: m.name || m.id, exists, checked: !exists }
-    })
-    if (!fetchList.value.length) fetchError.value = '该供应商未返回任何模型'
-  } catch (e: any) {
-    fetchError.value = e?.message ?? String(e)
-  } finally {
-    fetchLoading.value = false
-  }
-}
-
-function toggleAllFetch(v: boolean) {
-  fetchList.value = fetchList.value.map((x) => ({ ...x, checked: v }))
-}
-
-/** 把勾选的模型 / 手动输入的模型 id 加入该供应商 */
-function applyFetch() {
-  const p = configProviders.value[fetchProviderIdx.value]
-  if (!p) return
-  const add: ModelRow[] = []
-  for (const f of fetchList.value) {
-    if (f.checked && !p.models.some((x) => x.model === f.id) && !add.some((x) => x.model === f.id)) {
-      add.push({ key: '', name: f.id, model: f.id, visibleToUsers: true })
-    }
-  }
-  const manual = fetchManual.value
-    .split(/[\s,，、]+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-  for (const id of manual) {
-    if (!p.models.some((x) => x.model === id) && !add.some((x) => x.model === id)) {
-      add.push({ key: '', name: id, model: id, visibleToUsers: true })
-    }
-  }
-  p.models.push(...add)
-  fetchOpen.value = false
-}
-
-async function saveModelConfig() {
-  const flat = configProviders.value.flatMap((p) => p.models.map((m) => compositeOf(p, m)))
-  const defaultKey = flat.includes(configDefaultId.value) ? configDefaultId.value : (flat[0] ?? '')
-  configSaving.value = true
-  configNotice.value = ''
-  modelsError.value = ''
-  try {
-    const r = await saveModels({
-      providers: configProviders.value.map((p, i) => ({
-        id: p.id,
-        name: p.name.trim() || undefined,
-        apiBase: p.apiBase.trim(),
-        apiKey: p.apiKey.trim() ? p.apiKey.trim() : undefined,
-        models: p.models.map((m) => ({
-          key: m.key,
-          name: m.name.trim() || m.model.trim(),
-          model: m.model.trim(),
-          visibleToUsers: m.visibleToUsers,
-        })),
-        order: i,
-      })),
-      defaultKey,
-    })
-    configProviders.value = providersFrom(r.providers)
-    configDefaultId.value = r.defaultId
-    configNotice.value = '已保存'
-    await loadModels()
-    if (!models.value.some((m) => m.id === selectedModel.value)) selectedModel.value = defaultModelId.value
-  } catch (e: any) {
-    modelsError.value = e?.message ?? String(e)
-  } finally {
-    configSaving.value = false
-  }
-}
 function stop() {
   abortController?.abort()
   loading.value = false
@@ -419,14 +210,24 @@ async function newSession() {
   }
 }
 
-async function deleteSession(id: string) {
-  if (!confirm('删除该会话及其历史记录？')) return
+// 删除会话：用应用内确认弹窗替代 window.confirm（桌面/移动 webview 会屏蔽原生 confirm → 点击无反应）
+const confirmDeleteId = ref('')
+
+function askDeleteSession(id: string) {
+  error.value = ''
+  confirmDeleteId.value = id
+}
+
+async function doDeleteSession() {
+  const id = confirmDeleteId.value
+  if (!id || loading.value) return
   try {
     const r = await api<{ sessions: AgentSession[] }>(`/api/agent/sessions/${id}`, {
       method: 'DELETE',
       headers: authHeaders(),
     })
     sessions.value = r.sessions
+    confirmDeleteId.value = ''
     if (currentId.value === id) {
       currentId.value = sessions.value[0]?.id ?? ''
       syncModelFromSession()
@@ -655,7 +456,7 @@ onMounted(async () => {
         >
           <span class="sess-title" @click="selectSession(s.id)">{{ s.title }}</span>
           <button class="sess-btn" title="重命名" @click.stop="renamingId = s.id; renameInput = s.title">✎</button>
-          <button class="sess-btn danger" title="删除" @click.stop="deleteSession(s.id)">×</button>
+          <button class="sess-btn danger" title="删除" @click.stop="askDeleteSession(s.id)">×</button>
         </div>
         <div v-if="renamingId" class="sess-rename">
           <input v-model="renameInput" class="sess-input" placeholder="会话名称" @keydown.enter="renameSession(renamingId)" />
@@ -815,6 +616,23 @@ onMounted(async () => {
           <div class="mc-actions">
             <button class="mc-btn primary" @click="applyFetch">加入所选</button>
             <button class="mc-btn" @click="fetchOpen = false">取消</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 删除会话确认：应用内弹窗（替代 window.confirm） -->
+    <Teleport to="body">
+      <div v-if="confirmDeleteId" class="sess-modal-mask" @click.self="confirmDeleteId = ''">
+        <div class="sess-modal" role="dialog" aria-label="确认删除会话">
+          <div class="sess-modal-title">删除该会话？</div>
+          <div class="sess-modal-body">会话及其历史记录将被永久删除，不可恢复。</div>
+          <div v-if="error" class="sess-modal-error">{{ error }}</div>
+          <div class="sess-modal-actions">
+            <button class="sess-modal-btn" :disabled="loading" @click="confirmDeleteId = ''">取消</button>
+            <button class="sess-modal-btn danger" :disabled="loading" @click="doDeleteSession">
+              {{ loading ? '删除中…' : '确认删除' }}
+            </button>
           </div>
         </div>
       </div>
@@ -1271,4 +1089,25 @@ onMounted(async () => {
 }
 .ap-actions { display: flex; gap: 8px; }
 .ap-state { font-size: 12px; color: var(--muted); }
+/* ---- 删除会话确认弹窗（应用内，2026-11-28） ---- */
+.sess-modal-mask {
+  position: fixed; inset: 0; z-index: 1200;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.sess-modal {
+  width: min(400px, 100%);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+  padding: 18px 18px 14px; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.35);
+}
+.sess-modal-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.sess-modal-body { margin-top: 8px; font-size: 13px; line-height: 1.7; color: var(--muted); }
+.sess-modal-error { margin-top: 8px; font-size: 12px; color: var(--danger); }
+.sess-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.sess-modal-btn {
+  padding: 6px 14px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel); color: var(--text); font-size: 13px; font-family: inherit; cursor: pointer;
+}
+.sess-modal-btn.danger { border-color: var(--danger); background: var(--danger); color: #fff; }
+.sess-modal-btn:disabled { opacity: 0.6; cursor: default; }
 </style>

@@ -11,7 +11,7 @@
 // stdout 只打印：keyId、可粘贴的 .env 行、可粘贴进 src/trusted-keys.ts 的片段、gitignore 检查结果。
 // **绝不打印私钥内容**（AC-1/AC-28）；CI 场景请自行把私钥文件内容存为 Secret，配合
 // `node scripts/sign-plugin.mjs --key-env <NAME>` 使用。
-import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from 'node:crypto'
+import { createHash, generateKeyPairSync, sign, verify } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'

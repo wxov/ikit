@@ -34,7 +34,10 @@ export class JsonStoreData implements StoreDataPersist {
   async save(data: StoreData): Promise<void> {
     this.cache = data
     await fs.mkdir(path.dirname(this.file), { recursive: true })
-    await fs.writeFile(this.file, JSON.stringify(data, null, 2), 'utf-8')
+    // 原子写（P2-14，2026-11-28）：先写临时文件再 rename，避免进程中断产生半写 JSON
+    const tmp = `${this.file}.tmp`
+    await fs.writeFile(tmp, JSON.stringify(data, null, 2), 'utf-8')
+    await fs.rename(tmp, this.file)
   }
 }
 

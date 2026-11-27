@@ -10,9 +10,13 @@ import {
   type DraftVisibility,
   type EmbedFn,
 } from './service.js'
-import { DRAFT_PUBLISH_CUTOFF, migrateLegacyDrafts } from './migrate.js'
+import { DRAFT_PUBLISH_CUTOFF, migrateLegacyDrafts, resolveDraftCutoff } from './migrate.js'
+import { createLogger } from '@ikit/shared'
+
+const log = createLogger('knowledge')
 
 declare module 'cordis' {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Cordis 约定：Events 的泛型参数 C 由框架使用
   interface Events<C extends Context = Context> {
     'knowledge:changed'(payload: {
       action: 'create' | 'update' | 'remove' | 'comment' | 'comment-removed'
@@ -99,17 +103,26 @@ export async function apply(ctx: Context, config: Config) {
   }
 
   // 存量草稿一次性迁移（幂等 + 截止时间 + 写前备份；只作用于本实例的数据目录）
+  // 截止时间：默认取常量，可用 KB_DRAFT_PUBLISH_CUTOFF 覆盖（P2-6）；非法值回退并告警
+  const cutoffInfo = resolveDraftCutoff(process.env.KB_DRAFT_PUBLISH_CUTOFF)
+  if (cutoffInfo.source === 'invalid-fallback') {
+    log.warn(
+      `[knowledge] KB_DRAFT_PUBLISH_CUTOFF 非法（${process.env.KB_DRAFT_PUBLISH_CUTOFF ?? ''}），已回退常量 ${DRAFT_PUBLISH_CUTOFF}`,
+    )
+  } else if (cutoffInfo.source === 'env') {
+    log.info(`[knowledge] draft cut-off overridden by env: ${cutoffInfo.cutoff}`)
+  }
   const migration = await migrateLegacyDrafts(store, {
     file: storageFile,
-    cutoff: DRAFT_PUBLISH_CUTOFF,
+    cutoff: cutoffInfo.cutoff,
     enabled: migrateDrafts !== 'off',
   })
   if (migration.ran) {
-    console.log(
+    log.info(
       `[knowledge] draft-publish migration: drafts=${migration.drafts} published=${migration.drafts} skipped=0 backup=${migration.backup ?? '<none>'} v1`,
     )
   } else if (migration.reason && migration.reason !== 'already-migrated' && migration.reason !== 'disabled') {
-    console.warn(`[knowledge] draft-publish migration skipped: ${migration.reason}`)
+    log.warn(`[knowledge] draft-publish migration skipped: ${migration.reason}`)
   }
 
   const service = createKnowledgeService(ctx, store, embed, { draftVisibility })
@@ -117,10 +130,10 @@ export async function apply(ctx: Context, config: Config) {
   ctx.set('knowledge', service)
   ctx.on('dispose', () => {
     if (store instanceof SqliteStore) store.close()
-    console.log('[knowledge] plugin disposed')
+    log.info('[knowledge] plugin disposed')
   })
 
-  console.log(
+  log.info(
     `[knowledge] plugin started, storage = "${storageLabel}", vector = ${embed ? 'on' : 'off'}, draftVisibility = ${draftVisibility}, migratedDrafts = ${migration.ran ? `publish(${migration.drafts})` : migrateDrafts === 'off' ? 'off' : 'skip'}`,
   )
 }
@@ -139,10 +152,10 @@ function migrateFromJson(sqlite: SqliteStore, jsonFile: string) {
       // 透传 meta：否则「JSON 迁移过 + SQLite 空库」的实例切换存储后会重跑迁移
       meta: data.meta ?? {},
     })
-    console.log(`[knowledge] 已从 JSON 迁移 ${data.entries?.length ?? 0} 条到 SQLite`)
+    log.info(`[knowledge] 已从 JSON 迁移 ${data.entries?.length ?? 0} 条到 SQLite`)
   } catch (e: any) {
     if (e?.code !== 'ENOENT') {
-      console.warn('[knowledge] JSON 迁移失败:', e instanceof Error ? e.message : e)
+      log.warn('[knowledge] JSON 迁移失败:', e instanceof Error ? e.message : e)
     }
   }
 }

@@ -10,12 +10,14 @@
 // 不会因为贴错公钥而误信）。公钥是公开信息，可随配置/镜像分发；私钥永不入库（.keys/ 已 gitignore）。
 import { readFileSync } from 'node:fs'
 import {
-  decodePublicKey,
   deriveKeyId,
   normalizePublicKeyPem,
   type TrustedKey,
   type TrustedKeyTable,
 } from './signing.js'
+import { createLogger } from '@ikit/shared'
+
+const log = createLogger('plugin-registry/trusted-keys')
 
 /**
  * 内置信任表：**默认空表**（官方密钥未生成前不得臆造；空表时按「未配置任何签名公钥」处理）。
@@ -47,7 +49,7 @@ export interface TrustedKeySources {
 
 /** 解析并合并信任表；非法项一律 warn + 忽略，不抛错（不阻断启动） */
 export function resolveTrustedKeys(sources: TrustedKeySources = {}): TrustedKeyTable {
-  const warn = sources.warn ?? ((msg: string) => console.warn(msg))
+  const warn = sources.warn ?? ((msg: string) => log.warn(msg))
   const readFile = sources.readFile ?? ((p: string) => readFileSync(p, 'utf-8'))
   const out: TrustedKeyTable = {}
 

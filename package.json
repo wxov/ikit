@@ -1,6 +1,6 @@
 {
   "name": "i-kit",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.33.2",
@@ -10,7 +10,12 @@
     "dev:web": "pnpm --filter @ikit/web dev",
     "build": "pnpm -r --if-present build",
     "build:prod": "pnpm --filter @ikit/web build && pnpm --filter @ikit/server start",
-    "start": "pnpm --filter @ikit/server start"
+    "start": "pnpm --filter @ikit/server start",
+    "test": "tsx --test \"packages/**/*.test.ts\" \"apps/**/*.test.ts\"",
+    "check:versions": "node scripts/check-versions.mjs",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "engines": {
     "node": ">=20"
@@ -21,6 +26,14 @@
     ]
   },
   "devDependencies": {
-    "adm-zip": "^0.6.0"
+    "@eslint/js": "^9.39.5",
+    "adm-zip": "^0.6.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-vue": "^10.12.1",
+    "globals": "^15.15.0",
+    "prettier": "^3.10.1",
+    "tsx": "4.23.12",
+    "typescript-eslint": "^8.74.0",
+    "vue-eslint-parser": "^10.4.2"
   }
 }

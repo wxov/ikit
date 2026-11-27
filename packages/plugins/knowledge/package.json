@@ -9,7 +9,8 @@
   },
   "dependencies": {
     "cordis": "^3.18.1",
-    "fuse.js": "^7.5.0"
+    "fuse.js": "^7.5.0",
+    "@ikit/shared": "workspace:*"
   },
   "devDependencies": {
     "@ikit/plugin-llm": "workspace:*",

@@ -1,7 +1,7 @@
 // 插件注册表存储：JSON 文件持久化
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import type { PluginConfig, PluginRecord } from './types.js'
+import type { PluginConfig } from './types.js'
 
 export interface PluginStore {
   load(): Promise<PluginConfig>

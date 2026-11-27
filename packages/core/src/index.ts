@@ -6,6 +6,7 @@ import agentPlugin from '@ikit/plugin-agent'
 import registryPlugin from '@ikit/plugin-registry'
 import accountPlugin from '@ikit/plugin-account'
 import storeDataPlugin from '@ikit/plugin-store-data'
+import shiguangPlugin from '@ikit/plugin-shiguang'
 import type { Config as DemoConfig } from '@ikit/plugin-demo'
 import type { Config as KnowledgeConfig } from '@ikit/plugin-knowledge'
 import type { Config as LlmConfig } from '@ikit/plugin-llm'
@@ -13,23 +14,11 @@ import type { Config as AgentConfig } from '@ikit/plugin-agent'
 import type { Config as RegistryConfig } from '@ikit/plugin-registry'
 import type { Config as AccountConfig } from '@ikit/plugin-account'
 import type { Config as StoreDataConfig } from '@ikit/plugin-store-data'
+import type { Config as ShiguangConfig } from '@ikit/plugin-shiguang'
 import type { DemoService } from '@ikit/plugin-demo'
-import type {
-  EntryVisibility,
-  KnowledgeEntry,
-  KnowledgeEntryInput,
-  KnowledgeSearchResult,
-  KnowledgeService,
-  Viewer,
-  VisibilitySyncMode,
-} from '@ikit/plugin-knowledge'
+import type { EntryVisibility, KnowledgeEntryInput, KnowledgeService, Viewer, VisibilitySyncMode } from '@ikit/plugin-knowledge'
 import type { ChatMessage, LlmService, LlmModelRegistry } from '@ikit/plugin-llm'
-import type {
-  AgentRunResult,
-  AgentService,
-  AgentStep,
-  AgentTool,
-} from '@ikit/plugin-agent'
+import type { AgentService } from '@ikit/plugin-agent'
 
 // 声明 Cordis 服务类型增强
 declare module 'cordis' {
@@ -42,6 +31,7 @@ declare module 'cordis' {
     pluginRegistry: import('@ikit/plugin-registry').PluginRegistryService
     account: import('@ikit/plugin-account').AccountService
     storeData: import('@ikit/plugin-store-data').StoreDataService
+    shiguang: import('@ikit/plugin-shiguang').ShiguangService
   }
 }
 
@@ -53,6 +43,7 @@ export interface CoreOptions {
   registry?: RegistryConfig
   account?: AccountConfig
   storeData?: StoreDataConfig
+  shiguang?: ShiguangConfig
 }
 
 export async function createCore(options: CoreOptions = {}) {
@@ -67,6 +58,8 @@ export async function createCore(options: CoreOptions = {}) {
   ctx.plugin(accountPlugin, options.account ?? {})
   // store-data：商店插件真实数据服务（统计/便签/日程/待办）
   ctx.plugin(storeDataPlugin, options.storeData ?? {})
+  // shiguang：拾光（日记/感悟/名言，默认内置，带开门密码）
+  ctx.plugin(shiguangPlugin, options.shiguang ?? {})
   await ctx.start()
   return ctx
 }

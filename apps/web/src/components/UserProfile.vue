@@ -12,7 +12,6 @@ const newPassword = ref('')
 const newPassword2 = ref('')
 const notice = ref('')
 const error = ref('')
-const busy = ref(false)
 const savingUser = ref(false)
 const savingPass = ref(false)
 
