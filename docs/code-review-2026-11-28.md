@@ -293,7 +293,12 @@ docs/         需求 / 技术 / 验收文档
   | auth-helpers / account | 17 | ✅ 17/17 |
   | agent / LLM | 18 | ✅ 18/18 |
   - `pnpm -r build` 通过；`pnpm test` 42/42
-- 后续：前端 `App.vue`（1562）/ `DocCuratorPanel.vue`（1322）/ `ArticleEditView.vue`（1294）；`routes.ts` 剩余（插件注册表 / demo / 上传 / health / 下载中心 / 系统信息）按需再拆。
+- **前端第一步（2026-11-28）**：`DocCuratorPanel.vue` **1322 → 1114 行**（−208）：
+  - 新增 `composables/useAgentModels.ts`（255 行）：模型清单加载、按会话回显、站主模型配置弹窗（供应商分组）、一键获取模型列表（状态 + API 调用，**template 未动**）
+  - 新增 `lib/agentModels.ts`（40 行）：`compositeOf` / `providersFrom` 纯函数；新增 4 个单测
+  - 验证：`vue-tsc` 类型检查 + vite 构建通过；`pnpm test` **46/46**；lint 0 errors
+  - 残余：模板级子组件（如 `ModelConfigDialog.vue`）尚未抽离，模型配置的实际交互建议再做一轮 UI 回归
+- 后续：`App.vue`（1562）/ `ArticleEditView.vue`（1294）拆分；模板级子组件抽离。
 
 ### ✅ P2-9 ESLint + Prettier（2026-11-28）
 - **ESLint 9 扁平配置**（`eslint.config.mjs`）：`@eslint/js` recommended + `typescript-eslint` recommended + `eslint-plugin-vue` **flat/essential**（仅正确性规则，避免格式类规则造成历史代码大改）。
