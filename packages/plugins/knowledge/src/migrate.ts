@@ -27,6 +27,23 @@ import type { KnowledgeStore } from './store.js'
  */
 export const DRAFT_PUBLISH_CUTOFF = '2026-10-14T05:29:24.000Z'
 
+/**
+ * 解析实际使用的截止时间（P2-6，2026-11-28）：
+ * - 允许用环境变量 `KB_DRAFT_PUBLISH_CUTOFF` 覆盖，**发版时无需改代码**（仍属数据迁移语义，需评审）；
+ * - 非法值不静默生效：回退到常量，并让调用方打印告警（source=invalid-fallback）；
+ * - 返回值中的 cutoff 统一规范化为 ISO（UTC）。
+ */
+export function resolveDraftCutoff(raw?: string): {
+  cutoff: string
+  source: 'env' | 'default' | 'invalid-fallback'
+} {
+  const value = (raw ?? '').trim()
+  if (!value) return { cutoff: DRAFT_PUBLISH_CUTOFF, source: 'default' }
+  const ts = Date.parse(value)
+  if (!Number.isFinite(ts)) return { cutoff: DRAFT_PUBLISH_CUTOFF, source: 'invalid-fallback' }
+  return { cutoff: new Date(ts).toISOString(), source: 'env' }
+}
+
 /** 幂等标记键（写在 `KnowledgeDb.meta`，随存储文件一起备份/回滚） */
 export const DRAFT_PUBLISH_MARKER = 'draftPublishV1'
 

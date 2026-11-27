@@ -217,10 +217,36 @@ docs/         需求 / 技术 / 验收文档
   - `packages/plugins/shiguang/src/service.test.ts`（密码/令牌/限流/条目 CRUD/无明文）
 - **CI**：`.github/workflows/ci.yml`（pnpm install → `pnpm -r build` → `pnpm test`）。
 
+### 🟡 P2-5 Token 存储：评估结论 + 缓解（2026-11-28）
+- **结论：暂不改为 httpOnly Cookie**。原因：三端（Web/Tauri/Capacitor）共用同一套 `Authorization` 头与 WS 鉴权；改 Cookie 需同时引入 CSRF 防护、WS 握手鉴权改造与跨端登录态同步，收益/风险比不佳。**保留 localStorage**，改为「降低 XSS 影响面」：
+- **已实现**（`packages/api/src/index.ts` 全局 `onSend`）：
+  - `X-Content-Type-Options: nosniff`
+  - `Referrer-Policy: same-origin`
+  - `X-Frame-Options: SAMEORIGIN`
+  - `Permissions-Policy: geolocation=(), camera=(), microphone=()`
+- **已验证**：`curl -I /api/health` 返回上述四项。
+- **待办**：CSP 需按前端实际资源（Vditor/KaTeX/内联样式/图片源）单独评估后以 Report-Only 起步；`httpOnly` 迁移列入后续架构议题。
+
+### ✅ P2-6 迁移截止时间可配置 + 校验（2026-11-28）
+- `migrate.ts` 新增 `resolveDraftCutoff(raw)`：支持 `KB_DRAFT_PUBLISH_CUTOFF` 覆盖（**发版不必改代码**）、规范化为 ISO；非法值**回退常量**并标记 `invalid-fallback`。
+- 启动日志区分来源：env 覆盖打印实际值；非法值打印告警（含回退后的常量）。
+- 测试 `migrate.test.ts`：常量可解析、**不得晚于当前时间**（防误设未来时间）、env 覆盖与非法回退。
+- `.env.example` 补 `KB_DRAFT_PUBLISH_CUTOFF` 说明（含“修改等价于数据迁移变更，需评审”）。
+
+### ✅ P2-7 KaTeX `trust` 显式固定（2026-11-28）
+- `markdown.ts`：`md.use(markdownItKatex, { trust: false, throwOnError: false, strict: 'ignore' })`——markdown-it-katex 会把该对象**原样传给** `katex.renderToString`，显式固定可防未来升级/误改默认值引入 `\href`/`\htmlData` 注入面；同步修正 `env.d.ts` 的插件类型签名（支持第二参）。
+
+### ✅ P2-14 `store-data` 原子写（2026-11-28）
+- `store.ts` 改为 `tmp + rename`（与 `shiguang` 一致）；测试覆盖：保存可读回、无 `.tmp` 残留、损坏文件回退为空数据。
+
 ### 待处理
-- P2-5 localStorage token、P2-6 迁移常量校验、P2-7 KaTeX `trust` 复核、P2-8 审计日志；
-- P2-9 ESLint/Prettier、P2-10 拆分巨型文件、P2-11 JSON Schema 校验、P2-12 统一版本源、P2-13 日志规范化、P2-14 `store-data` 原子写；
-- P1-4 覆盖扩充（服务层接口冒烟测试、SSRF 重绑定缓解）。
+- P2-8 写操作审计日志；
+- P2-9 ESLint/Prettier（依赖离线不可得，待网络可用时引入）；
+- P2-10 拆分巨型文件（`routes.ts`/`App.vue`/`DocCuratorPanel.vue`/`ArticleEditView.vue`）；
+- P2-11 Fastify JSON Schema 校验 + 统一错误处理；
+- P2-12 统一版本源（7 处派生 + 一致性校验）；
+- P2-13 日志规范化（`console.log` 40 处 → 结构化 logger）；
+- P2-5 CSP（Report-Only）与 httpOnly 迁移评估。
 
 ---
 

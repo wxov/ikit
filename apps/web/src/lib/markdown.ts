@@ -83,7 +83,10 @@ const md = new MarkdownIt({
 })
 
 // 数学公式（KaTeX）：支持 $行内$ 和 $$块级$$
-md.use(markdownItKatex)
+// 安全（P2-7，2026-11-28）：**显式固定** `trust: false`——markdown-it-katex 会把该对象原样传给
+// katex.renderToString；KaTeX 默认即 false，这里显式声明以防未来升级/误改默认值引入
+// `\href`/`\htmlData` 等可信扩展导致的注入风险。
+md.use(markdownItKatex, { trust: false, throwOnError: false, strict: 'ignore' })
 
 // ---------------------------------------------------------------------------
 // 文章互链（详见 `lib/docLinks.ts` 的语法说明）

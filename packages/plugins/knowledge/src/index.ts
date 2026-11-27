@@ -10,7 +10,7 @@ import {
   type DraftVisibility,
   type EmbedFn,
 } from './service.js'
-import { DRAFT_PUBLISH_CUTOFF, migrateLegacyDrafts } from './migrate.js'
+import { DRAFT_PUBLISH_CUTOFF, migrateLegacyDrafts, resolveDraftCutoff } from './migrate.js'
 
 declare module 'cordis' {
   interface Events<C extends Context = Context> {
@@ -99,9 +99,18 @@ export async function apply(ctx: Context, config: Config) {
   }
 
   // 存量草稿一次性迁移（幂等 + 截止时间 + 写前备份；只作用于本实例的数据目录）
+  // 截止时间：默认取常量，可用 KB_DRAFT_PUBLISH_CUTOFF 覆盖（P2-6）；非法值回退并告警
+  const cutoffInfo = resolveDraftCutoff(process.env.KB_DRAFT_PUBLISH_CUTOFF)
+  if (cutoffInfo.source === 'invalid-fallback') {
+    console.warn(
+      `[knowledge] KB_DRAFT_PUBLISH_CUTOFF 非法（${process.env.KB_DRAFT_PUBLISH_CUTOFF ?? ''}），已回退常量 ${DRAFT_PUBLISH_CUTOFF}`,
+    )
+  } else if (cutoffInfo.source === 'env') {
+    console.log(`[knowledge] draft cut-off overridden by env: ${cutoffInfo.cutoff}`)
+  }
   const migration = await migrateLegacyDrafts(store, {
     file: storageFile,
-    cutoff: DRAFT_PUBLISH_CUTOFF,
+    cutoff: cutoffInfo.cutoff,
     enabled: migrateDrafts !== 'off',
   })
   if (migration.ran) {

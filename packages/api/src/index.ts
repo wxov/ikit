@@ -47,6 +47,18 @@ export async function createApi(ctx: Context, meta: ApiMeta = {}): Promise<Fasti
     })
   }
 
+  // ---- 安全响应头（P2-5 加固，2026-11-28）----
+  // 说明：token 仍存 localStorage（三端 + WS 鉴权 + 无 CSRF 负担），故以「降低 XSS 影响面」为重点：
+  //   nosniff 防 MIME 嗅探；Referrer-Policy 防 Referer 泄露；X-Frame-Options 防点击劫持；
+  //   Permissions-Policy 关闭未使用的敏感能力。CSP 需按前端实际资源（Vditor/KaTeX/内联样式）单独评估后加。
+  app.addHook('onSend', async (_req, reply, payload) => {
+    reply.header('X-Content-Type-Options', 'nosniff')
+    reply.header('Referrer-Policy', 'same-origin')
+    reply.header('X-Frame-Options', 'SAMEORIGIN')
+    reply.header('Permissions-Policy', 'geolocation=(), camera=(), microphone=()')
+    return payload
+  })
+
   await app.register(cors, { origin: true })
   await app.register(websocket)
 
