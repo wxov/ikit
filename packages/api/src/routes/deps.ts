@@ -1,5 +1,6 @@
 // 路由模块共享依赖（P2-10）：由 routes.ts 注入，保持行为不变
 import type { AuditEvent } from '@ikit/shared'
+import type { EntryVisibility, Viewer } from '@ikit/core'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export interface ApiRouteDeps {
@@ -15,4 +16,13 @@ export interface ApiRouteDeps {
   ipOf: (req: any) => string
   /** 解析操作者用户名 */
   actorOf: (req: any) => Promise<string | undefined>
+  /** 由用户对象解析可见性上下文（组集合 + 是否站主） */
+  viewerOf: (user: any) => Promise<Viewer>
+  /** 由请求（Authorization）解析可见性上下文 */
+  resolveViewer: (req: any) => Promise<Viewer>
+  /** 校验批量 ids（空/超限/非字符串 → 400 并返回 null） */
+  parseBatchIds: (reply: any, ids: unknown) => string[] | null
+  /** 可见性入参归一化（非法值返回 null） */
+  normalizeVisibility: (v: string | undefined) => EntryVisibility | null
 }
+

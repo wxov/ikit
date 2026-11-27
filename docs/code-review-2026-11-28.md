@@ -268,14 +268,18 @@ docs/         需求 / 技术 / 验收文档
 - **验证**：`tmp/verify-audit.mjs` **14/14 PASS**（7 类动作均落盘，记录含时间/用户/IP/目标）。
 - 待补：回收站彻底删除/清空、批量删除/移动、发布/撤回、权限与用户组变更、插件 update/import。
 
-### 🟡 P2-10 拆分巨型文件（进行中：routes.ts 已完成第一步，2026-11-28）
-- `packages/api/src/routes.ts`：**1648 → 1240 行**；抽出：
-  - `routes/deps.ts`（`ApiRouteDeps`：requireUser/requireAdmin/tokenOf/audit/ipOf/actorOf 注入契约）
-  - `routes/plugin-store.ts`（225 行：插件商店 + 商店插件数据，9 个 `/api/plugin-store*`）
-  - `routes/shiguang.ts`（204 行：拾光 + AI 润色，10 个 `/api/shiguang*`）
-  - 两个模块由 `routes.ts` 以 `registerXxxRoutes(app, ctx, deps)` 注册，**行为不变**（代码原样搬运）。
-- **验证**：拆分后回归冒烟 **16/16 PASS**（插件商店 5 项、商店数据 3 项、拾光 8 项）；`routes.ts` 中旧路径引用为 0；`pnpm -r build` 通过；`pnpm test` 42/42。
-- 后续：`App.vue`（1562）、`DocCuratorPanel.vue`（1322）、`ArticleEditView.vue`（1294）与 `routes.ts` 其余域（knowledge/agent/account）继续拆分。
+### 🟡 P2-10 拆分巨型文件（进行中：`routes.ts` 两步拆分，2026-11-28）
+- `packages/api/src/routes.ts`：**1648 → 925 行**（累计 −44%）；抽出：
+  - `routes/deps.ts`（27 行）：`ApiRouteDeps` 注入契约（requireUser/requireAdmin/tokenOf/audit/ipOf/actorOf/viewerOf/resolveViewer/parseBatchIds/normalizeVisibility）
+  - `routes/plugin-store.ts`（225 行）：插件商店 + 商店插件数据（9 个 `/api/plugin-store*`）
+  - `routes/shiguang.ts`（204 行）：拾光 + AI 润色（10 个 `/api/shiguang*`）
+  - `routes/knowledge.ts`（344 行）：知识库 / 评论 / 批量 / 回收站 / 分类 / 可见性（24 个 `/api/knowledge*`，`MAX_IMPORT_ENTRIES` 随迁）
+- `routes.ts` 内以单个 `const routeDeps: ApiRouteDeps = { … }` 统一注入，模块通过 `registerXxxRoutes(app, ctx, routeDeps)` 注册；**代码原样搬运，行为不变**。
+- **验证**：
+  - 拆分一（plugin-store/shiguang）回归冒烟 **16/16 PASS**
+  - 拆分二（knowledge）回归冒烟 **17/17 PASS**（列表/新建/更新/浏览/评论/可见性/分类/导入/置顶/批量删除/回收站还原/彻底删除）
+  - `pnpm -r build` 通过；`pnpm test` 42/42
+- 后续：`App.vue`（1562）、`DocCuratorPanel.vue`（1322）、`ArticleEditView.vue`（1294）与 `routes.ts` 其余域（account/agent/llm）。
 
 ### 待处理
 - P2-9 ESLint/Prettier（依赖离线不可得，待网络可用时引入）；
