@@ -44,6 +44,43 @@ const editing = ref<null | { id?: string; type: EntryType; date: string; title: 
 )
 const confirmDeleteId = ref('')
 
+// ---- AI 润色（仅日记 / 感悟）----
+const polishing = ref(false)
+const polishResult = ref('')
+const polishError = ref('')
+
+function resetPolish() {
+  polishResult.value = ''
+  polishError.value = ''
+}
+
+async function doPolish() {
+  const v = editing.value
+  if (!v || polishing.value || v.type === 'quote' || !v.content.trim()) return
+  polishing.value = true
+  polishResult.value = ''
+  polishError.value = ''
+  try {
+    const r = await api<{ text: string }>('/api/shiguang/polish', {
+      method: 'POST',
+      headers: hdrs(),
+      body: JSON.stringify({ type: v.type, content: v.content }),
+    })
+    polishResult.value = r.text
+  } catch (e: any) {
+    polishError.value = errMsg(e)
+  } finally {
+    polishing.value = false
+  }
+}
+
+function applyPolish() {
+  if (!editing.value || !polishResult.value) return
+  editing.value.content = polishResult.value
+  resetPolish()
+  notice.value = '已采纳润色结果'
+}
+
 const locked = computed(() => !token.value)
 const filtered = computed(() =>
   entries.value.filter((e) => (filter.value === 'all' ? true : e.type === filter.value)),
@@ -237,9 +274,11 @@ async function loadEntries() {
 function startNew(type: EntryType) {
   editing.value = { type, date: type === 'diary' ? today() : '', title: '', author: '', content: '' }
   error.value = ''
+  resetPolish()
 }
 
 function startEdit(e: Entry) {
+  resetPolish()
   editing.value = {
     id: e.id,
     type: e.type,
@@ -253,6 +292,7 @@ function startEdit(e: Entry) {
 
 function cancelEdit() {
   editing.value = null
+  resetPolish()
 }
 
 async function save() {
@@ -394,6 +434,30 @@ onMounted(loadStatus)
           <input v-if="editing.type === 'quote'" v-model="editing.author" class="sg-input sm" placeholder="出处/作者" />
         </div>
         <textarea v-model="editing.content" class="sg-textarea" rows="6" placeholder="写点什么…" />
+        <!-- AI 润色：仅日记 / 感悟 -->
+        <div class="sg-editor-tools">
+          <button
+            v-if="editing.type !== 'quote'"
+            class="sg-btn sm"
+            :disabled="polishing || !editing.content.trim()"
+            :title="editing.content.trim() ? '让 AI 优化表达（不改原意）' : '先写点内容'"
+            @click="doPolish"
+          >
+            {{ polishing ? '润色中…' : '✨ AI 润色' }}
+          </button>
+          <span v-else class="sg-hint">名言不支持 AI 润色</span>
+        </div>
+        <div v-if="polishResult || polishError" class="sg-polish">
+          <div class="sg-polish-head">AI 润色结果（不改原意，仅优化表达）</div>
+          <div v-if="polishError" class="sg-polish-error">{{ polishError }}</div>
+          <template v-else>
+            <div class="sg-polish-text">{{ polishResult }}</div>
+            <div class="sg-row">
+              <button class="sg-btn sm ghost" @click="resetPolish">放弃</button>
+              <button class="sg-btn sm primary" @click="applyPolish">采纳替换</button>
+            </div>
+          </template>
+        </div>
         <div class="sg-row">
           <button class="sg-btn ghost" @click="cancelEdit">取消</button>
           <button class="sg-btn primary" :disabled="busy" @click="save">{{ busy ? '保存中…' : editing.id ? '保存修改' : '记下' }}</button>
@@ -521,4 +585,14 @@ onMounted(loadStatus)
   background: var(--bg); text-align: left;
 }
 .sg-reset-tip { margin: 0 0 8px; font-size: 12px; color: var(--danger, #dc2626); line-height: 1.7; }
+/* ---- AI 润色（2026-11-28）---- */
+.sg-editor-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sg-hint { font-size: 12px; color: var(--muted); }
+.sg-polish {
+  border: 1px solid var(--primary); border-radius: 10px; padding: 10px 12px;
+  background: var(--primary-soft); display: flex; flex-direction: column; gap: 8px;
+}
+.sg-polish-head { font-size: 12px; font-weight: 600; color: var(--primary-dark); }
+.sg-polish-text { font-size: 14px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; color: var(--text); }
+.sg-polish-error { font-size: 12px; color: var(--danger, #dc2626); }
 </style>
