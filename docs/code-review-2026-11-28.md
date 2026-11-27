@@ -298,7 +298,11 @@ docs/         需求 / 技术 / 验收文档
   - 新增 `lib/agentModels.ts`（40 行）：`compositeOf` / `providersFrom` 纯函数；新增 4 个单测
   - 验证：`vue-tsc` 类型检查 + vite 构建通过；`pnpm test` **46/46**；lint 0 errors
   - 残余：模板级子组件（如 `ModelConfigDialog.vue`）尚未抽离，模型配置的实际交互建议再做一轮 UI 回归
-- 后续：`App.vue`（1562）/ `ArticleEditView.vue`（1294）拆分；模板级子组件抽离。
+- **前端第二步（2026-11-28）**：`ArticleEditView.vue` **1294 → 1201 行**（−93）：
+  - 新增 `composables/useDraftSnapshot.ts`：本地快照 500ms 节流器（同一窗口复用一次读值刷新字数）
+  - 新增 `lib/draftStats.ts`：`countOf` / `errText` 纯函数；新增 4 个单测
+  - 验证：`vue-tsc` + vite 构建通过；`pnpm test` **50/50**；lint 0 errors
+- 后续：`App.vue`（1562）拆分；模板级子组件抽离（如 `ModelConfigDialog.vue`、编辑器外壳）。
 
 ### ✅ P2-9 ESLint + Prettier（2026-11-28）
 - **ESLint 9 扁平配置**（`eslint.config.mjs`）：`@eslint/js` recommended + `typescript-eslint` recommended + `eslint-plugin-vue` **flat/essential**（仅正确性规则，避免格式类规则造成历史代码大改）。

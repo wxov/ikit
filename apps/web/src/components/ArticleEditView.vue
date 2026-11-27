@@ -37,6 +37,8 @@ import {
   type DocIndexItem,
 } from '../lib/docLinks'
 import { docIndex, refreshDocIndex } from '../lib/docIndex'
+import { countOf, errText } from '../lib/draftStats'
+import { useDraftSnapshot } from '../composables/useDraftSnapshot'
 import VditorEditor from './VditorEditor.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import DocToc, { type TocItem } from './DocToc.vue'
@@ -433,24 +435,11 @@ function scheduleLinkStates() {
 watch(index, () => void nextTick(applyLinkStates))
 
 // ---------------------------------------------------------------------------
-// 本地快照（刷新 / 崩溃恢复，非弹窗提示条）
+// 本地快照（刷新 / 崩溃恢复）：节流器抽到 composables/useDraftSnapshot.ts（P2-10 前端拆分）
 // ---------------------------------------------------------------------------
-const pendingSnap = ref<DraftSnapshot | null>(null)
-const snapDismissed = ref(false)
-
-function errText(e: unknown): string {
-  const raw = e instanceof Error ? e.message : String(e)
-  try {
-    const j = JSON.parse(raw) as { error?: string }
-    if (j?.error) return j.error
-  } catch {
-    /* 非 JSON：原样展示 */
-  }
-  return raw
-}
-
-function snapshot(): DraftSnapshot {
-  return {
+const { pendingSnap, snapDismissed, snapshot, cancelSnapTimer, writeSnapNow, touchSnapshot } = useDraftSnapshot({
+  currentKey,
+  readSnapshot: () => ({
     title: title.value,
     content: editorRef.value?.readValue() ?? '',
     category: category.value,
@@ -458,29 +447,10 @@ function snapshot(): DraftSnapshot {
     cover: cover.value,
     updatedAt: Date.now(),
     entryId: entryId.value,
-  }
-}
-
-// ---- 本地快照节流器：input 回调**不读** getValue()，由 500ms 定时器统一读一次 ----
-const SNAP_THROTTLE = 500
-let snapTimer: ReturnType<typeof setTimeout> | null = null
-function cancelSnapTimer() {
-  if (snapTimer) clearTimeout(snapTimer)
-  snapTimer = null
-}
-function writeSnapNow() {
-  cancelSnapTimer()
-  writeSnapshot(currentKey(), snapshot())
-}
-function touchSnapshot() {
-  if (snapTimer) return
-  snapTimer = setTimeout(() => {
-    snapTimer = null
-    // 同一个节流窗口内顺手刷新字数（复用这一次读值，不额外调用 getValue）
-    refreshStats()
-    writeSnapshot(currentKey(), snapshot())
-  }, SNAP_THROTTLE)
-}
+  }),
+  writeSnapshot,
+  onThrottle: refreshStats,
+})
 
 // ---------------------------------------------------------------------------
 // 底部状态条（飞书式）：字数 + 保存状态 + 最后保存时间
@@ -488,17 +458,6 @@ function touchSnapshot() {
 // ---------------------------------------------------------------------------
 const bodyChars = ref(0)
 const bodyWords = ref(0)
-
-function countOf(text: string): { chars: number; words: number } {
-  const chars = text.replace(/\s/g, '').length
-  const cjk = (text.match(/[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g) ?? []).length
-  const latin = (
-    text
-      .replace(/[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g, ' ')
-      .match(/[A-Za-z0-9_'-]+/g) ?? []
-  ).length
-  return { chars, words: cjk + latin }
-}
 
 function refreshStats() {
   const c = countOf(editorRef.value?.readValue() ?? '')
