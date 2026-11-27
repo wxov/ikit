@@ -2,13 +2,9 @@
 import { ref, computed, onMounted, onUnmounted, provide } from 'vue'
 import { createSocket, api, type EventItem, type WsMessage, type WsStatus } from './lib/api'
 import { createWsConflictGate, type WsConflictState } from './lib/wsConflict'
-import {
-  fetchUpdateManifest,
-  hasUpdate as hasUpdateFn,
-  type UpdateInfo,
-} from './lib/update'
 import { getToken, setToken, logout, currentUser, authHeaders, type PublicUser } from './lib/auth'
 import { startDesktopNode } from './lib/agentNode'
+import { useAppShell } from './composables/useAppShell'
 import {
   docIndex,
   refreshDocIndex,
@@ -236,19 +232,27 @@ const filterCat = ref('')
 const filterTag = ref('')
 // 设置 / 编辑资料弹窗
 const settingsOpen = ref(false)
+
+// ---- 外壳通用状态（P2-10）：toast / 热更新 / 主题 抽到 composables/useAppShell.ts ----
+const {
+  appToast,
+  showAppToast,
+  updateInfo,
+  updateAvailable,
+  updateOpen,
+  checkUpdate,
+  scheduleUpdateChecks,
+  onUpdateApplied,
+  onRequestUpdate,
+  dismissUpdate,
+  theme,
+  toggleTheme,
+  dispose: disposeAppShell,
+} = useAppShell({ settingsOpen })
 const profileOpen = ref(false)
 // 窄屏侧栏抽屉（<1200px 时左右侧栏收纳为抽屉）
 const sideLeftOpen = ref(false)
 const sideRightOpen = ref(false)
-
-// 全局轻提示（发布/撤回等反馈；非弹窗）
-const appToast = ref('')
-let appToastTimer: ReturnType<typeof setTimeout> | null = null
-function showAppToast(msg: string) {
-  appToast.value = msg
-  if (appToastTimer) clearTimeout(appToastTimer)
-  appToastTimer = setTimeout(() => (appToast.value = ''), 3000)
-}
 
 /**
  * 站主详情容器是否处于「可就地编辑」状态（**无模式**：打开一篇已发布/草稿文章、或新建空文档，
@@ -613,62 +617,6 @@ function submitGlobalSearch() {
   tab.value = HOME_TAB
 }
 
-// 热更新
-const updateInfo = ref<UpdateInfo | null>(null)
-const updateAvailable = ref(false)
-const updateOpen = ref(false)
-
-async function checkUpdate() {
-  const info = await fetchUpdateManifest()
-  updateInfo.value = info
-  if (hasUpdateFn(info)) {
-    updateAvailable.value = true
-  }
-}
-
-// 主动推送：定期轮询 + 窗口聚焦/可见时检查（应用打开期间无需重启即可发现更新）
-let updateTimer: number | undefined
-function scheduleUpdateChecks() {
-  updateTimer = window.setInterval(() => checkUpdate(), 10 * 60 * 1000)
-  document.addEventListener('visibilitychange', onVisibilityChanged)
-  window.addEventListener('focus', checkUpdate)
-}
-function onVisibilityChanged() {
-  if (document.visibilityState === 'visible') checkUpdate()
-}
-
-function onUpdateApplied() {
-  updateAvailable.value = false
-}
-
-function onRequestUpdate(info: UpdateInfo) {
-  updateInfo.value = info
-  updateOpen.value = true
-  settingsOpen.value = false
-}
-
-function dismissUpdate() {
-  updateAvailable.value = false
-}
-
-// 暗色模式（默认跟随系统，可手动切换）
-const theme = ref<'light' | 'dark'>(
-  (localStorage.getItem('ikit-theme') as 'light' | 'dark') ??
-    (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
-)
-
-function applyTheme() {
-  document.documentElement.dataset.theme = theme.value
-  localStorage.setItem('ikit-theme', theme.value)
-}
-
-function toggleTheme() {
-  theme.value = theme.value === 'light' ? 'dark' : 'light'
-  applyTheme()
-}
-
-applyTheme()
-
 provide('events', events)
 provide('canWrite', computed(() => !!user.value))
 provide('userRole', computed(() => user.value?.role ?? 'guest'))
@@ -773,10 +721,7 @@ onUnmounted(() => {
   socket?.close()
   wsGate.dispose()
   stopDesktopNode()
-  if (updateTimer !== undefined) clearInterval(updateTimer)
-  if (appToastTimer) clearTimeout(appToastTimer)
-  document.removeEventListener('visibilitychange', onVisibilityChanged)
-  window.removeEventListener('focus', checkUpdate)
+  disposeAppShell()
   window.removeEventListener('click', onDocClick)
   window.removeEventListener('keydown', onKeyShortcut)
 })

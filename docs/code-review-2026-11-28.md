@@ -302,7 +302,11 @@ docs/         需求 / 技术 / 验收文档
   - 新增 `composables/useDraftSnapshot.ts`：本地快照 500ms 节流器（同一窗口复用一次读值刷新字数）
   - 新增 `lib/draftStats.ts`：`countOf` / `errText` 纯函数；新增 4 个单测
   - 验证：`vue-tsc` + vite 构建通过；`pnpm test` **50/50**；lint 0 errors
-- 后续：`App.vue`（1562）拆分；模板级子组件抽离（如 `ModelConfigDialog.vue`、编辑器外壳）。
+- **前端第三步（2026-11-28）**：`App.vue` **1562 → 1453 行**（−109）：
+  - 新增 `composables/useAppShell.ts`：全局轻提示（3s）、热更新检查（10min 轮询 + 聚焦/可见触发）、暗色模式（跟随系统 + localStorage），并提供 `dispose()` 统一清理定时器与监听
+  - 验证：`vue-tsc` + vite 构建通过；`pnpm test` 50/50；lint 0 errors
+- 前端拆分累计：`DocCuratorPanel` 1322 → 1114、`ArticleEditView` 1294 → 1201、`App` 1562 → 1453。
+- 后续（可选）：模板级子组件抽离（`ModelConfigDialog.vue`、编辑器外壳）、`App.vue` 导航/文档栈逻辑继续下沉。
 
 ### ✅ P2-9 ESLint + Prettier（2026-11-28）
 - **ESLint 9 扁平配置**（`eslint.config.mjs`）：`@eslint/js` recommended + `typescript-eslint` recommended + `eslint-plugin-vue` **flat/essential**（仅正确性规则，避免格式类规则造成历史代码大改）。
