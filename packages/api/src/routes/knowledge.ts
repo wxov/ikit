@@ -1,7 +1,7 @@
 // 由 routes.ts 拆分（P2-10，2026-11-28）
 import type { FastifyInstance } from 'fastify'
 import type { Context } from 'cordis'
-import type { KnowledgeEntryInput, Viewer, VisibilitySyncMode } from '@ikit/core'
+import type { KnowledgeEntryInput, VisibilitySyncMode } from '@ikit/core'
 import type { ApiRouteDeps } from './deps.js'
 
 /** 批量导入文档单次上限（超出直接 400，避免一次请求写入过多条目） */

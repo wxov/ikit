@@ -73,6 +73,24 @@ export async function createApi(ctx: Context, meta: ApiMeta = {}): Promise<Fasti
     reply.header('Referrer-Policy', 'same-origin')
     reply.header('X-Frame-Options', 'SAMEORIGIN')
     reply.header('Permissions-Policy', 'geolocation=(), camera=(), microphone=()')
+    // CSP 先以 **Report-Only** 上线（不拦截、只上报），观察前端资源类型后再切换为强制模式。
+    // 说明：Vditor/KaTeX 需要 inline style；图片允许 data:/blob:/http(s)；WS 走 ws:/wss:。
+    reply.header(
+      'Content-Security-Policy-Report-Only',
+      [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob: http: https:",
+        "font-src 'self' data:",
+        "connect-src 'self' http: https: ws: wss:",
+        "media-src 'self' blob:",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "frame-ancestors 'self'",
+        "form-action 'self'",
+      ].join('; '),
+    )
     return payload
   })
 

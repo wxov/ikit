@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import type { ApiRouteDeps } from './deps.js'
 
 export function registerAccountRoutes(app: FastifyInstance, ctx: any, deps: ApiRouteDeps): void {
-  const { requireUser, requireAdmin, tokenOf, audit, ipOf, actorOf, viewerOf, resolveViewer, callOf, resolveAgentModel, normalizeVisibility, parseBatchIds } = deps
+  const { requireUser, requireAdmin, tokenOf, audit, ipOf, actorOf } = deps
 
   // 注册已屏蔽（站主在用户管理手动建号）；保留登录/找回
   // 登录：账号维度限流在 account 服务内（5 次失败锁 5 分钟）；此处再按 IP 维度限流（20 次失败锁 10 分钟）

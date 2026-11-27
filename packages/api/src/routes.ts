@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { Context } from 'cordis'
-import type { ChatMessage, EntryVisibility, KnowledgeEntryInput, Viewer, VisibilitySyncMode } from '@ikit/core'
+
 import type { AuditEvent, AuditLog } from '@ikit/shared'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'

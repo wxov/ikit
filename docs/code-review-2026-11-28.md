@@ -226,6 +226,9 @@ docs/         需求 / 技术 / 验收文档
   - `Permissions-Policy: geolocation=(), camera=(), microphone=()`
 - **已验证**：`curl -I /api/health` 返回上述四项。
 - **待办**：CSP 需按前端实际资源（Vditor/KaTeX/内联样式/图片源）单独评估后以 Report-Only 起步；`httpOnly` 迁移列入后续架构议题。
+- **CSP Report-Only 已上线（2026-11-28）**：`Content-Security-Policy-Report-Only`：
+  `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https:; font-src 'self' data:; connect-src 'self' http: https: ws: wss:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'`。
+  先只上报不拦截，观察 Vditor/KaTeX/图片/WS 资源命中后再切换强制模式；`curl -I /api/health` 已验证返回。
 
 ### ✅ P2-6 迁移截止时间可配置 + 校验（2026-11-28）
 - `migrate.ts` 新增 `resolveDraftCutoff(raw)`：支持 `KB_DRAFT_PUBLISH_CUTOFF` 覆盖（**发版不必改代码**）、规范化为 ISO；非法值**回退常量**并标记 `invalid-fallback`。
@@ -304,6 +307,7 @@ docs/         需求 / 技术 / 验收文档
   - `vue/no-v-html`：Markdown 渲染已 `html: false` + KaTeX `trust: false` 兜底。
 - **暂不强制格式检查**（`format:check` 未入 CI）：历史代码风格未统一，全量 format 会产生巨大 diff；新增/改动文件可手动 `pnpm format`，后续逐步收紧。
 - 顺带修复的真实问题：`editorBlocks.ts` 正则多余转义、脚本稀疏数组、`mail.ts` 两处 `let → const`。
+- **收紧（2026-11-28）**：清理服务端未使用导入（`routes.ts` 5 个类型、`account.ts` 6 个 deps 解构项、`knowledge.ts` 1 个类型），warnings **36 → 24**；Vue 组件侧未使用变量保留，待 UI 回归后再清理（避免 ESLint 看不到模板动态引用导致误删）。
 
 ### 待处理
 - P2-10 其余巨型文件（前端 `App.vue` / `DocCuratorPanel.vue` / `ArticleEditView.vue`）；
