@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, inject, type Ref } from 'vue'
 import { api, type KnowledgeEntry } from '../lib/api'
 import { authHeaders } from '../lib/auth'
+import ConfirmDialog from './ConfirmDialog.vue'
 
 const emit = defineEmits<{ (e: 'open', entry: KnowledgeEntry): void }>()
 
@@ -40,8 +41,24 @@ async function restore(e: KnowledgeEntry) {
     setNotice(err.message)
   }
 }
-async function purge(e: KnowledgeEntry) {
-  if (!confirm(`彻底删除「${e.title}」？此操作不可恢复！`)) return
+// 彻底删除确认（2026-11-28）：应用内弹窗替代 window.confirm
+const confirmKind = ref<'' | 'one' | 'all'>('')
+const pendingEntry = ref<KnowledgeEntry | null>(null)
+
+function askPurge(e: KnowledgeEntry) {
+  pendingEntry.value = e
+  confirmKind.value = 'one'
+}
+
+function askEmptyAll() {
+  pendingEntry.value = null
+  confirmKind.value = 'all'
+}
+
+async function purge() {
+  const e = pendingEntry.value
+  confirmKind.value = ''
+  if (!e) return
   try {
     await api(`/api/knowledge/trash/${e.id}`, { method: 'DELETE', headers: authHeaders() })
     setNotice(`已彻底删除「${e.title}」`)
@@ -51,7 +68,7 @@ async function purge(e: KnowledgeEntry) {
   }
 }
 async function emptyAll() {
-  if (!confirm('确认清空回收站？此操作不可恢复！')) return
+  confirmKind.value = ''
   try {
     await api('/api/knowledge/trash', { method: 'DELETE', headers: authHeaders() })
     setNotice('回收站已清空')
@@ -70,7 +87,7 @@ onMounted(load)
       <h3>回收站</h3>
       <div class="tr-actions">
         <span v-if="notice" class="tr-notice">{{ notice }}</span>
-        <button v-if="isAdmin && entries.length" class="tr-btn danger" @click="emptyAll">🗑 清空回收站</button>
+        <button v-if="isAdmin && entries.length" class="tr-btn danger" @click="askEmptyAll">🗑 清空回收站</button>
       </div>
     </div>
     <div v-if="loading" class="tr-empty">加载中…</div>
@@ -82,10 +99,25 @@ onMounted(load)
         <span class="tr-date">{{ e.deletedAt?.slice(0, 10) }}</span>
         <div class="tr-ops">
           <button v-if="isAdmin" class="tr-btn" @click="restore(e)">恢复</button>
-          <button v-if="isAdmin" class="tr-btn danger" @click="purge(e)">彻底删除</button>
+          <button v-if="isAdmin" class="tr-btn danger" @click="askPurge(e)">彻底删除</button>
         </div>
       </div>
     </div>
+
+    <!-- 彻底删除确认：应用内弹窗 -->
+    <ConfirmDialog
+      :open="!!confirmKind"
+      :title="confirmKind === 'all' ? '清空回收站' : '彻底删除'"
+      :message="
+        confirmKind === 'all'
+          ? '回收站中的全部文章将被永久删除，不可恢复。确认清空？'
+          : `「${pendingEntry?.title ?? ''}」将被永久删除，不可恢复。`
+      "
+      :confirm-text="confirmKind === 'all' ? '清空回收站' : '彻底删除'"
+      danger
+      @confirm="confirmKind === 'all' ? emptyAll() : purge()"
+      @cancel="confirmKind = ''"
+    />
   </div>
 </template>
 

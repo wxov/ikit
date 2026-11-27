@@ -3,8 +3,52 @@ import { randomBytes, randomUUID, scrypt as _scrypt, timingSafeEqual } from 'nod
 import { promisify } from 'node:util'
 import type { AccountService, Group, PublicUser, User, UserRole } from './types.js'
 import type { JsonAccountStore } from './store.js'
+import { createLogger } from '@ikit/shared'
+
+const log = createLogger('account/service')
 
 export type EmailSender = (to: string, subject: string, html: string) => Promise<void>
+
+/** 账号域错误（带 code，便于 API 层映射 401/429） */
+export class AccountError extends Error {
+  code: string
+  constructor(code: string, message: string) {
+    super(message)
+    this.code = code
+    this.name = 'AccountError'
+  }
+}
+
+// ---- 登录失败限流（P1-2，2026-11-28）----
+// 进程内计数：同一账号 5 次失败锁 5 分钟；失败响应统一加 300ms 延迟（同时削弱用户名枚举的时序差异）。
+// 说明：进程重启后计数清零（可接受）；跨实例部署需外部存储（Redis）才能全局生效。
+const LOGIN_MAX_FAILS = 5
+const LOGIN_LOCK_MS = 5 * 60_000
+const LOGIN_FAIL_DELAY_MS = 300
+const loginFails = new Map<string, { fails: number; lockedUntil: number }>()
+
+const loginKeyOf = (username: string) => username.trim().toLowerCase()
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+function assertLoginNotLocked(key: string): void {
+  const rec = loginFails.get(key)
+  if (!rec || rec.lockedUntil <= Date.now()) return
+  const min = Math.max(1, Math.ceil((rec.lockedUntil - Date.now()) / 60_000))
+  throw new AccountError('E_LOGIN_LOCKED', `登录失败次数过多，请 ${min} 分钟后再试`)
+}
+
+function recordLoginFailure(key: string): boolean {
+  const rec = loginFails.get(key) ?? { fails: 0, lockedUntil: 0 }
+  rec.fails += 1
+  let lockedNow = false
+  if (rec.fails >= LOGIN_MAX_FAILS) {
+    rec.fails = 0
+    rec.lockedUntil = Date.now() + LOGIN_LOCK_MS
+    lockedNow = true
+  }
+  loginFails.set(key, rec)
+  return lockedNow
+}
 
 const scrypt = promisify(_scrypt) as (pwd: string, salt: string, keylen: number) => Promise<Buffer>
 
@@ -110,10 +154,28 @@ export function createAccount(
   return {
     async login(username, password) {
       await ensureLoaded()
+      const key = loginKeyOf(username)
+      assertLoginNotLocked(key)
       const user = findUser(username)
-      if (!user) throw new Error('用户名或密码错误')
-      if (user.disabled) throw new Error('账号已被禁用')
-      if (!(await verifyPassword(password, user.passwordHash))) throw new Error('用户名或密码错误')
+      if (!user) {
+        const lockedNow = recordLoginFailure(key)
+        await sleep(LOGIN_FAIL_DELAY_MS)
+        if (lockedNow) throw new AccountError('E_LOGIN_LOCKED', '登录失败次数过多，请 5 分钟后再试')
+        throw new AccountError('E_BAD_CREDENTIALS', '用户名或密码错误')
+      }
+      if (user.disabled) {
+        const lockedNow = recordLoginFailure(key)
+        await sleep(LOGIN_FAIL_DELAY_MS)
+        if (lockedNow) throw new AccountError('E_LOGIN_LOCKED', '登录失败次数过多，请 5 分钟后再试')
+        throw new AccountError('E_USER_DISABLED', '账号已被禁用')
+      }
+      if (!(await verifyPassword(password, user.passwordHash))) {
+        const lockedNow = recordLoginFailure(key)
+        await sleep(LOGIN_FAIL_DELAY_MS)
+        if (lockedNow) throw new AccountError('E_LOGIN_LOCKED', '登录失败次数过多，请 5 分钟后再试')
+        throw new AccountError('E_BAD_CREDENTIALS', '用户名或密码错误')
+      }
+      loginFails.delete(key)
       const token = randomBytes(24).toString('hex')
       config.sessions.push({ token, userId: user.id, createdAt: new Date().toISOString() })
       await persist()
@@ -139,7 +201,7 @@ export function createAccount(
           )
           return { sent: true }
         } catch (e) {
-          console.warn('[account] reset email failed:', e instanceof Error ? e.message : e)
+          log.warn('[account] reset email failed:', e instanceof Error ? e.message : e)
           return { sent: false, resetToken }
         }
       }

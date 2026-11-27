@@ -1,21 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import { api } from '../lib/api'
 import { authHeaders } from '../lib/auth'
 
-const props = defineProps<{ panel: string }>()
-
-const TITLE: Record<string, string> = {
-  stats: '数据统计',
-  notes: '便签',
-  calendar: '日历',
-  todo: '待办清单',
-  weather: '天气',
-  rss: 'RSS 订阅',
-  mdclip: 'Markdown 剪贴板',
-  hello: 'Hello 插件',
-}
-const title = computed(() => TITLE[props.panel] ?? props.panel)
+defineProps<{ panel: string }>()
 
 const hdrs = () => authHeaders()
 

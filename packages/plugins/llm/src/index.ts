@@ -9,6 +9,9 @@ import type {
   LlmService,
 } from './types.js'
 import { createModelRegistry } from './models.js'
+import { createLogger } from '@ikit/shared'
+
+const log = createLogger('llm')
 
 export const name = 'llm'
 
@@ -234,12 +237,12 @@ export function apply(ctx: Context, config: Config) {
   ctx.set('llmModels', modelRegistry)
 
   ctx.on('dispose', () => {
-    console.log('[llm] plugin disposed')
+    log.info('[llm] plugin disposed')
   })
 
-  console.log(`[llm] plugin started, model = "${model}", configured = ${!!apiKey}`)
-  console.log(`[llm] models: ${modelRegistry.listAll().models.length} 条，default=${modelRegistry.listAll().defaultId}`)
-  console.log(`[llm] embedding: model = "${embeddingModel}", enabled = ${embeddingEnabled}`)
+  log.info(`[llm] plugin started, model = "${model}", configured = ${!!apiKey}`)
+  log.info(`[llm] models: ${modelRegistry.listAll().models.length} 条，default=${modelRegistry.listAll().defaultId}`)
+  log.info(`[llm] embedding: model = "${embeddingModel}", enabled = ${embeddingEnabled}`)
 }
 
 export default { name, apply, Config }

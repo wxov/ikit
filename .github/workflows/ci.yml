@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, release, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (tsc + vue-tsc + vite)
+        run: pnpm -r --if-present build
+
+      - name: Version consistency
+        run: pnpm check:versions
+
+      - name: Lint (ESLint)
+        run: pnpm lint
+
+      - name: Test (node:test via tsx)
+        run: pnpm test

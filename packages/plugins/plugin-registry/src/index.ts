@@ -8,6 +8,9 @@ import { createPluginPackageLoader } from './loader.js'
 import { BUILTIN_TRUSTED_KEYS, resolveTrustedKeys } from './trusted-keys.js'
 import { normalizeSignatureMode } from './signing.js'
 import type { PluginRecord } from './types.js'
+import { createLogger } from '@ikit/shared'
+
+const log = createLogger('plugin-registry')
 
 declare module 'cordis' {
   interface Context {
@@ -86,6 +89,17 @@ export function apply(ctx: Context, config: Config) {
       visibleGroups: ['guest', 'user', 'admin'],
       panel: 'agent',
     },
+    {
+      // 拾光：日记 / 感悟 / 名言（默认内置；开门密码保护，默认仅站主可见，可在插件管理调整用户组）
+      name: 'shiguang',
+      title: '拾光',
+      version: '1.0.0',
+      enabled: true,
+      builtin: true,
+      order: 3,
+      visibleGroups: ['admin'],
+      panel: 'shiguang',
+    },
   ]
 
   const registry = createPluginRegistry(store, defaults, {
@@ -139,7 +153,7 @@ export function apply(ctx: Context, config: Config) {
         // （删除会丢 sha256/签名/order/visibleGroups 等唯一权威字段，且下次启动扫描又会重建 → 反复抖动）。
         // 这里只做逐包隔离：把异常收敛为该插件的错误日志，避免未处理拒绝（Node 默认会终止进程）
         // 阻断后续插件的激活。
-        console.error(
+        log.error(
           `[plugin-registry] failed to activate plugin "${p.name}" on startup:`,
           e instanceof Error ? e.message : e,
         )
@@ -147,11 +161,11 @@ export function apply(ctx: Context, config: Config) {
     }
   })
 
-  console.log(
+  log.info(
     `[plugin-registry] plugin started (signature mode=${signatureMode}, trustedKeys=${Object.keys(trustedKeys).length})`,
   )
   ctx.on('dispose', () => {
-    console.log('[plugin-registry] plugin disposed')
+    log.info('[plugin-registry] plugin disposed')
   })
 }
 

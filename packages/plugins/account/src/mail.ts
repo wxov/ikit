@@ -11,13 +11,6 @@ export interface SmtpConfig {
   from?: string
 }
 
-type Socket = import('node:net').Socket
-type TlsSocket = import('node:tls').TLSSocket
-
-interface Resolver {
-  (code: number, msg: string): void
-}
-
 export function createSmtpSender(cfg: SmtpConfig) {
   if (!cfg.host) return undefined
   const from = cfg.from || cfg.user || 'no-reply@ikit'
@@ -30,11 +23,10 @@ export function createSmtpSender(cfg: SmtpConfig) {
 
 function sendEmail(cfg: SmtpConfig, port: number, from: string, to: string, subject: string, html: string) {
   return new Promise<void>((resolve, reject) => {
-    let raw = cfg.secure ? tlsConnect({ host: cfg.host, port, servername: cfg.host }) : netConnect(port, cfg.host)
+    const raw = cfg.secure ? tlsConnect({ host: cfg.host, port, servername: cfg.host }) : netConnect(port, cfg.host)
     let stage = 'greeting'
     const lines: string[] = []
     let buf = ''
-    let greeted = false
 
     const abort = (err: Error) => {
       raw.destroy()

@@ -11,9 +11,11 @@ import type {
   KnowledgeSearchResult,
   KnowledgeService,
   Viewer,
-  VisibilitySyncMode,
 } from './types.js'
 import type { KnowledgeStore } from './store.js'
+import { createLogger } from '@ikit/shared'
+
+const log = createLogger('knowledge/service')
 
 const STOP_WORDS = new Set([
   '的', '了', '是', '吗', '呢', '啊', '吧', '请', '请问', '什么', '怎么', '如何',
@@ -225,7 +227,7 @@ export function createKnowledgeService(
       const [vec] = await embed([`${entry.title}\n${entry.content}`])
       if (vec?.length) entry.embedding = vec
     } catch (e) {
-      console.warn('[knowledge] embedding generation failed:', e instanceof Error ? e.message : e)
+      log.warn('[knowledge] embedding generation failed:', e instanceof Error ? e.message : e)
     }
   }
 
@@ -633,7 +635,7 @@ export function createKnowledgeService(
             }
           }
         } catch (e) {
-          console.warn('[knowledge] vector search failed:', e instanceof Error ? e.message : e)
+          log.warn('[knowledge] vector search failed:', e instanceof Error ? e.message : e)
         }
       }
 

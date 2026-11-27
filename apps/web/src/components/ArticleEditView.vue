@@ -37,7 +37,10 @@ import {
   type DocIndexItem,
 } from '../lib/docLinks'
 import { docIndex, refreshDocIndex } from '../lib/docIndex'
+import { countOf, errText } from '../lib/draftStats'
+import { useDraftSnapshot } from '../composables/useDraftSnapshot'
 import VditorEditor from './VditorEditor.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 import DocToc, { type TocItem } from './DocToc.vue'
 
 const props = withDefaults(
@@ -432,24 +435,11 @@ function scheduleLinkStates() {
 watch(index, () => void nextTick(applyLinkStates))
 
 // ---------------------------------------------------------------------------
-// 本地快照（刷新 / 崩溃恢复，非弹窗提示条）
+// 本地快照（刷新 / 崩溃恢复）：节流器抽到 composables/useDraftSnapshot.ts（P2-10 前端拆分）
 // ---------------------------------------------------------------------------
-const pendingSnap = ref<DraftSnapshot | null>(null)
-const snapDismissed = ref(false)
-
-function errText(e: unknown): string {
-  const raw = e instanceof Error ? e.message : String(e)
-  try {
-    const j = JSON.parse(raw) as { error?: string }
-    if (j?.error) return j.error
-  } catch {
-    /* 非 JSON：原样展示 */
-  }
-  return raw
-}
-
-function snapshot(): DraftSnapshot {
-  return {
+const { pendingSnap, snapDismissed, snapshot, cancelSnapTimer, writeSnapNow, touchSnapshot } = useDraftSnapshot({
+  currentKey,
+  readSnapshot: () => ({
     title: title.value,
     content: editorRef.value?.readValue() ?? '',
     category: category.value,
@@ -457,29 +447,10 @@ function snapshot(): DraftSnapshot {
     cover: cover.value,
     updatedAt: Date.now(),
     entryId: entryId.value,
-  }
-}
-
-// ---- 本地快照节流器：input 回调**不读** getValue()，由 500ms 定时器统一读一次 ----
-const SNAP_THROTTLE = 500
-let snapTimer: ReturnType<typeof setTimeout> | null = null
-function cancelSnapTimer() {
-  if (snapTimer) clearTimeout(snapTimer)
-  snapTimer = null
-}
-function writeSnapNow() {
-  cancelSnapTimer()
-  writeSnapshot(currentKey(), snapshot())
-}
-function touchSnapshot() {
-  if (snapTimer) return
-  snapTimer = setTimeout(() => {
-    snapTimer = null
-    // 同一个节流窗口内顺手刷新字数（复用这一次读值，不额外调用 getValue）
-    refreshStats()
-    writeSnapshot(currentKey(), snapshot())
-  }, SNAP_THROTTLE)
-}
+  }),
+  writeSnapshot,
+  onThrottle: refreshStats,
+})
 
 // ---------------------------------------------------------------------------
 // 底部状态条（飞书式）：字数 + 保存状态 + 最后保存时间
@@ -487,17 +458,6 @@ function touchSnapshot() {
 // ---------------------------------------------------------------------------
 const bodyChars = ref(0)
 const bodyWords = ref(0)
-
-function countOf(text: string): { chars: number; words: number } {
-  const chars = text.replace(/\s/g, '').length
-  const cjk = (text.match(/[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g) ?? []).length
-  const latin = (
-    text
-      .replace(/[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g, ' ')
-      .match(/[A-Za-z0-9_'-]+/g) ?? []
-  ).length
-  return { chars, words: cjk + latin }
-}
 
 function refreshStats() {
   const c = countOf(editorRef.value?.readValue() ?? '')
@@ -814,9 +774,17 @@ async function togglePublish() {
   }
 }
 
+// 删除文章确认（2026-11-28）：应用内弹窗替代 window.confirm（webview 屏蔽原生 confirm）
+const confirmRemove = ref(false)
+
+function askRemove() {
+  if (!entryId.value || busy.value) return
+  confirmRemove.value = true
+}
+
 async function remove() {
   if (!entryId.value || busy.value) return
-  if (!confirm(`确认删除「${title.value || '未命名草稿'}」？此操作将移入回收站。`)) return
+  confirmRemove.value = false
   busy.value = true
   inlineError.value = ''
   try {
@@ -944,7 +912,7 @@ defineExpose({
       </span>
       <span class="ad-spacer" />
       <span class="ad-edit-hint" :class="{ 'is-hidden': shellActive }">✎ 点击正文即可编辑</span>
-      <button v-if="entryId" class="ad-btn danger-ghost" :disabled="busy" @click="remove">🗑 删除</button>
+      <button v-if="entryId" class="ad-btn danger-ghost" :disabled="busy" @click="askRemove">🗑 删除</button>
       <button class="ad-btn primary" :disabled="publishing" @click="togglePublish">
         {{ publishing ? '处理中…' : isDraft ? '发布' : '撤回' }}
       </button>
@@ -1082,6 +1050,18 @@ defineExpose({
         <span class="ad-hint ad-hint-link" :title="LINK_HINT">互链 <code>[[ ]]</code> ⓘ</span>
       </div>
     </div>
+
+    <!-- 删除文章确认：应用内弹窗（替代 window.confirm） -->
+    <ConfirmDialog
+      :open="confirmRemove"
+      title="删除文章"
+      :message="`确认删除「${title || '未命名草稿'}」？文章将移入回收站（可恢复）。`"
+      confirm-text="移入回收站"
+      danger
+      :busy="busy"
+      @confirm="remove"
+      @cancel="confirmRemove = false"
+    />
   </section>
 </template>
 

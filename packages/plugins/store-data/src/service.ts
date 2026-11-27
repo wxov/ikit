@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type { Context } from 'cordis'
 import type { Note, CalendarEvent, TodoItem, MdDraft, RssItem, StatEntry, StoreDataService } from './types.js'
 import type { JsonStoreData } from './store.js'
+import { safeFetchText } from '@ikit/shared'
 
 export function createStoreData(ctx: Context, store: JsonStoreData): StoreDataService {
   let loaded = false
@@ -135,10 +136,10 @@ export function createStoreData(ctx: Context, store: JsonStoreData): StoreDataSe
       }
     },
 
-    // RSS：抓取并提取 <title>/<link>
+    // RSS：抓取并提取 <title>/<link>（安全抓取：拒绝内网/本机、逐跳校验重定向、512KB 上限）
     async rss(url) {
       try {
-        const html = await fetch(url, { headers: { 'user-agent': 'i-kit-rss/1.0' } }).then((r) => r.text())
+        const html = (await safeFetchText(url, { userAgent: 'i-kit-rss/1.0', timeoutMs: 10000, maxBytes: 512 * 1024 })).text
         const items: RssItem[] = []
         const re = /<item[^>]*>([\s\S]*?)<\/item>/gi
         let m: RegExpExecArray | null

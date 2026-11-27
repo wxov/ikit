@@ -14,6 +14,7 @@
     "@ikit/plugin-knowledge": "workspace:*",
     "@ikit/plugin-llm": "workspace:*",
     "@ikit/plugin-registry": "workspace:*",
+    "@ikit/plugin-shiguang": "workspace:*",
     "@ikit/plugin-store-data": "workspace:*",
     "cordis": "^3.18.1"
   },

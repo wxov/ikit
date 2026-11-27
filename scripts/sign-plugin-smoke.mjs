@@ -48,7 +48,7 @@ function run(args, env) {
   return { code: r.status, out, err }
 }
 const STATUS_RE = /^status:\s*(verified|unsigned|unverified|invalid)\b/m
-const statusOf = (out) => (out.match(STATUS_RE) || [, ''])[1]
+const statusOf = (out) => (out.match(STATUS_RE) || [undefined, ''])[1]
 const hashOf = (out) => (out.trim().match(/^[0-9a-f]{64}$/) ? out.trim() : '')
 /** 取 `--registry-entry` 打印的 JSON 条目 */
 function entryOf(out) {

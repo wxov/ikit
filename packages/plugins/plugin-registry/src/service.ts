@@ -12,7 +12,6 @@ import type {
   PluginRegistryService,
   PluginSource,
   PluginStoreItem,
-  PluginUninstallResult,
   RemoteRegistryPlugin,
 } from './types.js'
 import type { JsonPluginStore } from './store.js'
@@ -42,6 +41,9 @@ import {
 } from './signing.js'
 import { BUILTIN_TRUSTED_KEYS, resolveTrustedKeys } from './trusted-keys.js'
 import type { PluginPackageManifest } from './loader.js'
+import { createLogger } from '@ikit/shared'
+
+const log = createLogger('plugin-registry/service')
 
 function defaultVisibility(): string[] {
   return ['guest', 'user', 'admin']
@@ -110,7 +112,7 @@ function safeScan(files: ExtractedFile[], entry: string | undefined): ScanSummar
     return scanPackageCode(files, entry || 'index.js')
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
-    console.warn(`[plugin-registry] 安全扫描失败（不影响安装）: ${msg}`)
+    log.warn(`[plugin-registry] 安全扫描失败（不影响安装）: ${msg}`)
     return {
       warnings: [`安全扫描失败：${msg}（不影响安装）`],
       scannedAt: new Date().toISOString(),
@@ -149,11 +151,11 @@ export function createPluginRegistry(
     {}
   if (signatureMode !== 'off') {
     const ids = Object.keys(trustedKeys)
-    console.log(
+    log.info(
       `[plugin-registry] signature mode=${signatureMode} trustedKeys=${ids.length}${ids.length ? ` (${ids.join('、')})` : ''}`,
     )
     if (!ids.length) {
-      console.warn(
+      log.warn(
         '[plugin-registry][signature] 未配置任何签名公钥（PLUGIN_SIGNING_PUBKEY / _PUBKEY_FILE / _KEYS 与内置信任表均为空），签名一律无法验证（状态记为 unverified）',
       )
     }
@@ -181,7 +183,7 @@ export function createPluginRegistry(
     const bodyEnv = args.bodyEnvelope
     const zipEnv = args.zipEnvelope
     if (bodyEnv && zipEnv && (bodyEnv.signature !== zipEnv.signature || bodyEnv.keyId !== zipEnv.keyId || bodyEnv.signedHash !== zipEnv.signedHash)) {
-      console.warn(
+      log.warn(
         `[plugin-registry][signature] "${args.name}": 请求体签名与包内 zip comment 签名不一致，以请求体为准`,
       )
     }
@@ -217,9 +219,9 @@ export function createPluginRegistry(
     // 日志：任何分支都不输出密钥内容（仅 keyId / 哈希前 8 位）
     const line = `[plugin-registry][signature] install "${args.name}" mode=${signatureMode} source=${args.source} status=${verdict.status} keyId=${verdict.keyId ?? '-'} hash=${args.treeSha256.slice(0, 8)}…`
     if (verdict.status === 'verified') {
-      console.log(`${line}${verdict.warning ? ` warning=${verdict.warning}` : ''}`)
+      log.info(`${line}${verdict.warning ? ` warning=${verdict.warning}` : ''}`)
     } else {
-      console.warn(`${line}${verdict.error ? ` error=${verdict.error}` : ''}${verdict.warning ? ` warning=${verdict.warning}` : ''}`)
+      log.warn(`${line}${verdict.error ? ` error=${verdict.error}` : ''}${verdict.warning ? ` warning=${verdict.warning}` : ''}`)
     }
     return { verdict, envelope }
   }
@@ -597,7 +599,7 @@ export function createPluginRegistry(
     try {
       await persist()
     } catch (e) {
-      console.warn(
+      log.warn(
         `[plugin-registry] 回滚注册记录写盘失败 "${name}":`,
         e instanceof Error ? e.message : e,
       )
@@ -657,7 +659,7 @@ export function createPluginRegistry(
             await reloadOne(name)
             if (recordBefore?.enabled) loaderHooks.onEnable?.(name)
           } catch (restoreErr) {
-            console.warn(
+            log.warn(
               `[plugin-registry] 更新失败后恢复旧版本实例失败 "${name}":`,
               restoreErr instanceof Error ? restoreErr.message : restoreErr,
             )
@@ -676,7 +678,7 @@ export function createPluginRegistry(
           try {
             loaderHooks.onDiscard?.(name)
           } catch (discardErr) {
-            console.warn(
+            log.warn(
               `[plugin-registry] 丢弃失败包实例出错 "${name}":`,
               discardErr instanceof Error ? discardErr.message : discardErr,
             )
@@ -747,7 +749,7 @@ export function createPluginRegistry(
     }
     if (proto !== 'https:') {
       if (proto === 'http:' && allowHttp) {
-        console.warn('[plugin-registry] allowHttp=true：允许 http 明文下载（仅限本地调试）')
+        log.warn('[plugin-registry] allowHttp=true：允许 http 明文下载（仅限本地调试）')
       } else {
         throw new Error(
           proto === 'http:'
@@ -833,11 +835,11 @@ export function createPluginRegistry(
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = (await res.json()) as any
       remoteCatalog = sanitizeRemoteRegistry(data)
-      console.log(`[plugin-registry] remote registry loaded: ${remoteCatalog.length} plugins`)
+      log.info(`[plugin-registry] remote registry loaded: ${remoteCatalog.length} plugins`)
       // 缺 sha256 的条目保留在商店中（管理员可见可排查），但标记为不可安装 → 汇总 warn
       const missing = remoteCatalog.filter((p) => !isSha256Hex(p.sha256))
       if (missing.length) {
-        console.warn(
+        log.warn(
           `[plugin-registry] ${missing.length} 条远端条目缺少 sha256，已标记为不可安装：${missing
             .map((p) => p.name)
             .join('、')}`,
@@ -850,12 +852,12 @@ export function createPluginRegistry(
           (p) => !!p.signature && !!p.keyId && Object.keys(trustedKeys).length > 0 && !trustedKeys[p.keyId],
         )
         if (unsigned.length) {
-          console.warn(
+          log.warn(
             `[plugin-registry] ${unsigned.length} 条远端条目未签名（PLUGIN_SIGNATURE_MODE=${signatureMode}）`,
           )
         }
         if (unknown.length) {
-          console.warn(
+          log.warn(
             `[plugin-registry] ${unknown.length} 条远端条目的签名密钥未受信任（keyId 不在信任表）：${unknown
               .map((p) => p.name)
               .join('、')}`,
@@ -863,7 +865,7 @@ export function createPluginRegistry(
         }
       }
     } catch (e) {
-      console.warn(
+      log.warn(
         `[plugin-registry] remote registry fetch failed, falling back to builtin:`,
         e instanceof Error ? e.message : e,
       )
@@ -1120,7 +1122,7 @@ export function createPluginRegistry(
         assertSha256(String(sha256).trim(), treeSha256)
       } else {
         // 本地导入保持 warn 放行（管理员本机文件 + 二次确认，哈希为可选完整性自校验）
-        console.warn(`[plugin-registry] import "${manifest.name}" without sha256（未校验内容，仅安装受信任来源）`)
+        log.warn(`[plugin-registry] import "${manifest.name}" without sha256（未校验内容，仅安装受信任来源）`)
       }
       // 验签（落盘前；enforce 下本地导入同样强制 —— 签名策略与来源无关）
       const bodySig = parseSignatureInput(sigInput)

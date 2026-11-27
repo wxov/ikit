@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 import {
   listUsers,
   createUser,
@@ -173,8 +174,17 @@ async function doRename(g: Group) {
     error.value = e.message
   }
 }
-async function doDeleteGroup(g: Group) {
-  if (!confirm(`删除用户组「${g.name}」？组内用户将回落至「注册用户」组。`)) return
+// 删除用户组确认（2026-11-28）：应用内弹窗替代 window.confirm
+const confirmGroup = ref<Group | null>(null)
+
+function askDeleteGroup(g: Group) {
+  confirmGroup.value = g
+}
+
+async function doDeleteGroup() {
+  const g = confirmGroup.value
+  confirmGroup.value = null
+  if (!g) return
   try {
     const r = await deleteGroup(g.id)
     groups.value = r.groups
@@ -246,7 +256,7 @@ onMounted(load)
                 <option v-for="p in allowedParents(g)" :key="p.id" :value="p.id">{{ p.name }}</option>
               </select>
               <button v-if="!g.builtin" class="um-btn" @click="renamingId = g.id; renameInput = g.name">重命名</button>
-              <button v-if="!g.builtin" class="um-btn danger" @click="doDeleteGroup(g)">删除</button>
+              <button v-if="!g.builtin" class="um-btn danger" @click="askDeleteGroup(g)">删除</button>
             </template>
           </div>
         </div>
@@ -300,6 +310,17 @@ onMounted(load)
         </div>
       </div>
     </div>
+
+    <!-- 删除用户组确认：应用内弹窗 -->
+    <ConfirmDialog
+      :open="!!confirmGroup"
+      title="删除用户组"
+      :message="`确认删除用户组「${confirmGroup?.name ?? ''}」？组内用户将回落至「注册用户」组。`"
+      confirm-text="删除"
+      danger
+      @confirm="doDeleteGroup"
+      @cancel="confirmGroup = null"
+    />
   </div>
 </template>
 

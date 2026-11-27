@@ -10,6 +10,9 @@ import { pathToFileURL } from 'node:url'
 import type { Context } from 'cordis'
 import type { PluginUninstallResult } from './types.js'
 import { isEntryExtensionAllowed } from './utils.js'
+import { createLogger } from '@ikit/shared'
+
+const log = createLogger('plugin-registry/loader')
 
 export interface PluginPackageManifest {
   name: string
@@ -167,7 +170,7 @@ export function createPluginPackageLoader(
         try {
           dispose()
         } catch (e) {
-          console.warn(
+          log.warn(
             `[plugin-loader] failed to undo ctx.set of "${entry.manifest.name}":`,
             e instanceof Error ? e.message : e,
           )
@@ -213,7 +216,7 @@ export function createPluginPackageLoader(
         try {
           primary!()
         } catch (e) {
-          console.warn(
+          log.warn(
             `[plugin-loader] dispose failed for "${entry.manifest.name}":`,
             e instanceof Error ? e.message : e,
           )
@@ -280,14 +283,14 @@ export function createPluginPackageLoader(
           loaded: false,
           error: res.error ?? '加载失败',
         })
-        console.warn(`[plugin-loader] failed to load plugin "${name}":`, res.error)
+        log.warn(`[plugin-loader] failed to load plugin "${name}":`, res.error)
         continue
       }
       packages.set(res.manifest!.name, res.entry)
       // 上报到插件注册表（先记 loaded，激活由 registry 按 enabled 决定）；await 确保注册表先落盘
       await register(res.manifest!, { manifest: res.manifest!, loaded: true })
       results.push({ manifest: res.manifest!, loaded: true })
-      console.log(`[plugin-loader] loaded plugin package "${res.manifest!.name}" v${res.manifest!.version}`)
+      log.info(`[plugin-loader] loaded plugin package "${res.manifest!.name}" v${res.manifest!.version}`)
     }
     return results
   }
@@ -310,7 +313,7 @@ export function createPluginPackageLoader(
     }
     packages.set(res.manifest!.name, res.entry)
     await register(res.manifest!, { manifest: res.manifest!, loaded: true })
-    console.log(`[plugin-loader] loaded plugin package "${res.manifest!.name}" v${res.manifest!.version} (loadOne)`)
+    log.info(`[plugin-loader] loaded plugin package "${res.manifest!.name}" v${res.manifest!.version} (loadOne)`)
     return { manifest: res.manifest!, loaded: true }
   }
 
@@ -325,7 +328,7 @@ export function createPluginPackageLoader(
         // 否则本次重载/回滚再注册同名服务会被 cordis 拒绝
         if (existing.dispose) existing.dispose()
       } catch (e) {
-        console.warn(`[plugin-loader] dispose failed during reload "${name}":`, e instanceof Error ? e.message : e)
+        log.warn(`[plugin-loader] dispose failed during reload "${name}":`, e instanceof Error ? e.message : e)
       }
       packages.delete(name)
     }
@@ -352,7 +355,7 @@ export function createPluginPackageLoader(
         activated = true
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
-        console.error(
+        log.error(
           `[plugin-loader] plugin "${res.manifest!.name}" v${res.manifest!.version} loaded but failed to activate:`,
           msg,
         )
@@ -364,7 +367,7 @@ export function createPluginPackageLoader(
         }
       }
     }
-    console.log(`[plugin-loader] reloaded plugin package "${res.manifest!.name}" v${res.manifest!.version}`)
+    log.info(`[plugin-loader] reloaded plugin package "${res.manifest!.name}" v${res.manifest!.version}`)
     return { manifest: res.manifest!, loaded: true, activated }
   }
 
@@ -377,7 +380,7 @@ export function createPluginPackageLoader(
     if (!entry.applied) {
       runApply(entry)
       entry.applied = true
-      console.log(`[plugin-loader] applied service "${name}"`)
+      log.info(`[plugin-loader] applied service "${name}"`)
     }
     entry.active = true
     return true
@@ -388,7 +391,7 @@ export function createPluginPackageLoader(
     const entry = packages.get(name)
     if (!entry) return false
     entry.active = false
-    console.log(`[plugin-loader] deactivated "${name}"`)
+    log.info(`[plugin-loader] deactivated "${name}"`)
     return true
   }
 
@@ -412,26 +415,26 @@ export function createPluginPackageLoader(
       return { handled: false, ok: true }
     }
     if (targetDir && !isWithinRoot(targetDir)) {
-      console.error(`[plugin-loader] refuse to delete "${targetDir}" (outside plugin dir root)`)
+      log.error(`[plugin-loader] refuse to delete "${targetDir}" (outside plugin dir root)`)
       return { handled: true, ok: false, error: '目录越界，已拒绝删除' }
     }
     try {
       // 不论 applied 与否都释放（含「注册了服务后 apply 抛错」的半注册状态）
       if (entry?.dispose) entry.dispose()
     } catch (e) {
-      console.warn(`[plugin-loader] dispose failed during uninstall "${name}":`, e instanceof Error ? e.message : e)
+      log.warn(`[plugin-loader] dispose failed during uninstall "${name}":`, e instanceof Error ? e.message : e)
     }
     if (entry) packages.delete(entry.manifest.name)
     if (!targetDir || !hasDir) {
-      console.log(`[plugin-loader] uninstalled "${name}" (no package directory)`)
+      log.info(`[plugin-loader] uninstalled "${name}" (no package directory)`)
       return { handled: true, ok: true }
     }
     try {
       await fs.rm(targetDir, { recursive: true, force: true })
-      console.log(`[plugin-loader] uninstalled package "${name}": directory removed (${targetDir})`)
+      log.info(`[plugin-loader] uninstalled package "${name}": directory removed (${targetDir})`)
       return { handled: true, ok: true }
     } catch (e) {
-      console.error(`[plugin-loader] failed to remove directory "${targetDir}":`, e instanceof Error ? e.message : e)
+      log.error(`[plugin-loader] failed to remove directory "${targetDir}":`, e instanceof Error ? e.message : e)
       return { handled: true, ok: false, error: e instanceof Error ? e.message : String(e) }
     }
   }
@@ -445,10 +448,10 @@ export function createPluginPackageLoader(
       // 不论 applied 与否都释放：apply 抛错前已注册的服务也要清掉（否则重装/回滚再注册同名服务会被 cordis 拒绝）
       if (entry.dispose) entry.dispose()
     } catch (e) {
-      console.warn(`[plugin-loader] dispose failed during discard "${name}":`, e instanceof Error ? e.message : e)
+      log.warn(`[plugin-loader] dispose failed during discard "${name}":`, e instanceof Error ? e.message : e)
     }
     packages.delete(name)
-    console.log(`[plugin-loader] discarded in-memory package instance "${name}" (install rollback)`)
+    log.info(`[plugin-loader] discarded in-memory package instance "${name}" (install rollback)`)
     return true
   }
 

@@ -5,7 +5,10 @@ import fastifyStatic from '@fastify/static'
 import type { WebSocket } from 'ws'
 import type { Context } from 'cordis'
 import { createBus } from './bus.js'
+import { createAuditLog, createLogger } from '@ikit/shared'
 import { registerRoutes, type ApiMeta } from './routes.js'
+
+const log = createLogger('api')
 
 export type { ApiMeta }
 
@@ -47,6 +50,50 @@ export async function createApi(ctx: Context, meta: ApiMeta = {}): Promise<Fasti
     })
   }
 
+  // ---- 统一错误处理（P2-11，2026-11-28）----
+  // schema 校验失败 → 400 + 可读 details；其余错误保留 statusCode（5xx 记录日志，不向客户端泄露堆栈）
+  app.setErrorHandler((err: any, _req, reply) => {
+    if (err?.validation) {
+      const details = (err.validation as Array<{ instancePath?: string; message?: string }>)
+        .map((v) => `${v.instancePath || '(root)'} ${v.message ?? ''}`.trim())
+        .join('; ')
+      return reply.code(400).send({ error: `参数校验失败：${details}`, code: 'E_VALIDATION' })
+    }
+    const status = typeof err?.statusCode === 'number' && err.statusCode >= 400 ? err.statusCode : 500
+    if (status >= 500) log.error('[api] unhandled error:', err)
+    return reply.code(status).send({ error: err?.message ?? '服务器错误', code: err?.code })
+  })
+
+  // ---- 安全响应头（P2-5 加固，2026-11-28）----
+  // 说明：token 仍存 localStorage（三端 + WS 鉴权 + 无 CSRF 负担），故以「降低 XSS 影响面」为重点：
+  //   nosniff 防 MIME 嗅探；Referrer-Policy 防 Referer 泄露；X-Frame-Options 防点击劫持；
+  //   Permissions-Policy 关闭未使用的敏感能力。CSP 需按前端实际资源（Vditor/KaTeX/内联样式）单独评估后加。
+  app.addHook('onSend', async (_req, reply, payload) => {
+    reply.header('X-Content-Type-Options', 'nosniff')
+    reply.header('Referrer-Policy', 'same-origin')
+    reply.header('X-Frame-Options', 'SAMEORIGIN')
+    reply.header('Permissions-Policy', 'geolocation=(), camera=(), microphone=()')
+    // CSP 先以 **Report-Only** 上线（不拦截、只上报），观察前端资源类型后再切换为强制模式。
+    // 说明：Vditor/KaTeX 需要 inline style；图片允许 data:/blob:/http(s)；WS 走 ws:/wss:。
+    reply.header(
+      'Content-Security-Policy-Report-Only',
+      [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob: http: https:",
+        "font-src 'self' data:",
+        "connect-src 'self' http: https: ws: wss:",
+        "media-src 'self' blob:",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "frame-ancestors 'self'",
+        "form-action 'self'",
+      ].join('; '),
+    )
+    return payload
+  })
+
   await app.register(cors, { origin: true })
   await app.register(websocket)
 
@@ -64,7 +111,9 @@ export async function createApi(ctx: Context, meta: ApiMeta = {}): Promise<Fasti
     })
   })
 
-  registerRoutes(app, ctx, meta)
+  // 写操作审计（P2-8）：默认 ./data/audit.jsonl，AUDIT_LOG=off 关闭，AUDIT_LOG_FILE 可覆盖
+  const audit = createAuditLog()
+  registerRoutes(app, ctx, { ...meta, audit })
 
   // 热更新分发包静态托管（/update/<version>/<bundle>）
   if (meta.updateRoot) {

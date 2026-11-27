@@ -2,11 +2,14 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { Schema } from 'cordis'
+import { createLogger, safeFetchText } from '@ikit/shared'
 import type { Context } from 'cordis'
 import type { ChatMessage, LlmChatOptions, LlmService, LlmToolDefinition } from '@ikit/plugin-llm'
 import type { KnowledgeService, Viewer } from '@ikit/plugin-knowledge'
 import { JsonAgentStore, type AgentStore } from './store.js'
 import type { AgentCallContext, AgentMessage, AgentMessageInput, AgentNode, AgentNodeInput, AgentService, AgentSession, AgentStreamEvent, AgentTask, AgentTaskInput, AgentTool } from './types.js'
+
+const log = createLogger('agent')
 
 export const name = 'agent'
 // account 为可选依赖：仅用于存量会话迁移时解析 admin 首账号；不注入时按「无 admin」兜底清空
@@ -116,12 +119,10 @@ export function apply(_ctx: Context, config: Config) {
       const url = String(args.url ?? '').trim()
       if (!/^https?:\/\//i.test(url)) return '仅支持 http/https 链接'
       try {
-        const res = await fetch(url, {
-          headers: { 'user-agent': 'i-kit-agent/1.0' },
-          signal: AbortSignal.timeout(15000),
-        })
-        if (!res.ok) return `请求失败 HTTP ${res.status}`
-        const html = await res.text()
+        // 安全抓取：仅 http/https、拒绝内网/本机/链路本地（含云元数据）、逐跳校验重定向、响应体上限 1MB
+        const safe = await safeFetchText(url, { userAgent: 'i-kit-agent/1.0', timeoutMs: 15000, maxBytes: 1024 * 1024 })
+        if (!safe.ok) return `请求失败 HTTP ${safe.status}`
+        const html = safe.text
         const title = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1]?.trim() ?? ''
         const text = html
           .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -211,7 +212,7 @@ export function apply(_ctx: Context, config: Config) {
             ? (args.visibility as 'public' | 'login' | 'private')
             : undefined
         const tags = Array.isArray(args.tags) ? args.tags.map((t) => String(t).trim()).filter(Boolean) : undefined
-        console.log(`[agent] knowledge_add by user ${call?.userId ?? '(unknown)'}`)
+        log.info(`[agent] knowledge_add by user ${call?.userId ?? '(unknown)'}`)
         const entry = await ctx.knowledge.create({
           title,
           content,
@@ -295,7 +296,7 @@ export function apply(_ctx: Context, config: Config) {
           patch.status = args.status
         }
         if (!Object.keys(patch).length) return '没有可修改的字段（请提供 title/content/category/tags/visibility/status 之一）。'
-        console.log(`[agent] knowledge_update by user ${call?.userId ?? '(unknown)'} -> ${target.id}`)
+        log.info(`[agent] knowledge_update by user ${call?.userId ?? '(unknown)'} -> ${target.id}`)
         const updated = await ctx.knowledge.update(target.id, patch as any)
         if (!updated) return '修改失败：目标文档不存在或已删除。'
         const fields = Object.keys(patch).join('/')
@@ -441,14 +442,14 @@ export function apply(_ctx: Context, config: Config) {
     if (admin) {
       for (const s of legacy) s.ownerId = admin.id
       await store.save(db)
-      console.log(`[agent] 已将 ${legacy.length} 个遗留会话归属给 admin`)
+      log.info(`[agent] 已将 ${legacy.length} 个遗留会话归属给 admin`)
       return { migrated: legacy.length, cleared: 0 }
     }
 
     db.sessions = db.sessions.filter((s) => s.ownerId)
     db.messages = db.messages.filter((m) => db.sessions.some((s) => s.id === m.sessionId))
     await store.save(db)
-    console.warn(`[agent] 未找到 admin，清空 ${legacy.length} 个遗留会话`)
+    log.warn(`[agent] 未找到 admin，清空 ${legacy.length} 个遗留会话`)
     return { migrated: 0, cleared: legacy.length }
   }
 
@@ -692,10 +693,10 @@ export function apply(_ctx: Context, config: Config) {
 
   ctx.set('agent', service)
   ctx.on('dispose', () => {
-    console.log('[agent] plugin disposed')
+    log.info('[agent] plugin disposed')
   })
 
-  console.log(`[agent] plugin started, ${tools.size} tools registered`)
+  log.info(`[agent] plugin started, ${tools.size} tools registered`)
 }
 
 export default { name, inject, apply, Config }

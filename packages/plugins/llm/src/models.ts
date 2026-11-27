@@ -9,6 +9,9 @@
 // - 权限：站主看全部；其他登录用户只看 `visibleToUsers` 的模型。
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { createLogger } from '@ikit/shared'
+
+const log = createLogger('llm/models')
 
 export interface LlmModelEntryRecord {
   key: string
@@ -227,7 +230,7 @@ export function createModelRegistry(opts: ModelRegistryOptions): LlmModelRegistr
         }
       }
     } catch (e) {
-      console.warn('[llm] 模型清单损坏，将重新种子：', (e as Error)?.message)
+      log.warn('[llm] 模型清单损坏，将重新种子：', (e as Error)?.message)
     }
     // 首次种子：用当前 llm Config（通常来自 .env）生成默认供应商 + 默认模型
     const seed: StoreFile = {
