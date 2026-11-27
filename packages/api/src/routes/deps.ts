@@ -24,5 +24,9 @@ export interface ApiRouteDeps {
   parseBatchIds: (reply: any, ids: unknown) => string[] | null
   /** 可见性入参归一化（非法值返回 null） */
   normalizeVisibility: (v: string | undefined) => EntryVisibility | null
+  /** 由用户对象构造 Agent 调用上下文 */
+  callOf: (user: any) => Promise<{ viewer: Viewer; userId?: string; role: 'user' | 'admin' }>
+  /** 解析本次请求使用的模型（不可用 → ok:false + error） */
+  resolveAgentModel: (user: any, requested?: string) => any
 }
 

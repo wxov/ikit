@@ -9,10 +9,10 @@ import type { ApiRouteDeps } from './routes/deps.js'
 import { registerPluginStoreRoutes } from './routes/plugin-store.js'
 import { registerShiguangRoutes } from './routes/shiguang.js'
 import { registerKnowledgeRoutes } from './routes/knowledge.js'
+import { createAuthHelpers } from './routes/auth-helpers.js'
+import { registerAccountRoutes } from './routes/account.js'
 
 // 批量导入文档单次上限（超出直接 400，避免一次请求写入过多条目）
-// 批量删除 / 批量移动单次上限（与 knowledge 服务层 MAX_BATCH_IDS 一致）
-const MAX_BATCH_IDS = 500
 
 export interface ApiMeta {
   name?: string
@@ -140,289 +140,29 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   }))
 
   // ---- 账号体系 ----
-  const tokenOf = (req: any) =>
-    (req.headers['authorization'] as string || '').replace(/^Bearer\s+/i, '').trim()
+  // 鉴权 / 可见性 / Agent 调用上下文统一由工厂提供（P2-10：抽到 routes/auth-helpers.ts）
+  const auth = createAuthHelpers(ctx)
+  const { tokenOf, requireAdmin, requireUser, viewerOf, resolveViewer, callOf, resolveAgentModel, normalizeVisibility, parseBatchIds } =
+    auth
 
-  function requireAdmin<T>(req: any, reply: any, fn: () => Promise<T>) {
-    return (async () => {
-      const token = tokenOf(req)
-      const user = await ctx.account.me(token)
-      if (!user || user.role !== 'admin') {
-        return reply.code(403).send({ error: '需要站主权限' })
-      }
-      return await fn()
-    })()
+  const routeDeps: ApiRouteDeps = {
+    requireUser,
+    requireAdmin,
+    tokenOf,
+    audit,
+    ipOf,
+    actorOf,
+    viewerOf,
+    resolveViewer,
+    parseBatchIds,
+    normalizeVisibility,
+    callOf,
+    resolveAgentModel,
   }
 
-  // 要求已登录（游客只读，写操作需登录）
-  function requireUser<T>(req: any, reply: any, fn: (user: any) => Promise<T>) {
-    return (async () => {
-      const user = await ctx.account.me(tokenOf(req))
-      if (!user) {
-        return reply.code(401).send({ error: '请先登录' })
-      }
-      return await fn(user)
-    })()
-  }
 
-  // 由用户对象解析「可见性判定上下文」（组集合含包含关系展开 + 是否站主）
-  async function viewerOf(user: any): Promise<Viewer> {
-    const groups = await ctx.account.effectiveGroupsOf(user)
-    return { groups, isAdmin: user?.role === 'admin' }
-  }
-
-  async function resolveViewer(req: any): Promise<Viewer> {
-    return viewerOf(await ctx.account.me(tokenOf(req)))
-  }
-
-  // user → Agent 调用上下文（完善④）：viewer 由「调用者」解析，与 HTTP 知识库接口同源
-  async function callOf(user: any) {
-    return {
-      viewer: await viewerOf(user),
-      userId: user?.id as string | undefined,
-      // 写类工具（knowledge_add/knowledge_update）据此鉴权：仅站主可用
-      role: (user?.role === 'admin' ? 'admin' : 'user') as 'user' | 'admin',
-    }
-  }
-
-  /**
-   * 解析「小知」本次请求使用的模型（2026-11-22 模型配置与选择）：
-   * - 未指定 → 默认模型；
-   * - 指定 → 必须在「该角色可见的模型清单」内（非 admin 只能用 visibleToUsers 的），否则 400；
-   * - 返回可直接透传给 llm 的 { model, apiBase?, apiKey? }。
-   */
-  function resolveAgentModel(
-    user: any,
-    requested?: string,
-  ):
-    | { ok: true; rec: { id: string; model: string; apiBase?: string; apiKey?: string } }
-    | { ok: false; error: string } {
-    const rid = (requested ?? '').trim()
-    const view = ctx.llmModels.listPublic(user?.role)
-    if (rid && !view.models.some((m) => m.id === rid)) {
-      return { ok: false, error: '无权使用该模型或模型不存在' }
-    }
-    try {
-      return { ok: true, rec: ctx.llmModels.resolve(rid || undefined) }
-    } catch (e: any) {
-      return { ok: false, error: e?.message ?? '模型配置不可用' }
-    }
-  }
-
-  function normalizeVisibility(v: string | undefined): EntryVisibility | null {
-    return v === 'public' || v === 'login' || v === 'groups' || v === 'private' ? v : null
-  }
-
-  /**
-   * 批量接口 `ids` 入参校验（站主）：必须为非空字符串数组、元素非空、数量 ≤ MAX_BATCH_IDS。
-   * 校验不通过时已发送 400 并返回 null，调用方直接 return（不进入服务层写入）。
-   */
-  function parseBatchIds(reply: any, ids: unknown): string[] | null {
-    if (!Array.isArray(ids) || !ids.length) {
-      reply.code(400).send({ error: 'ids array is required' })
-      return null
-    }
-    if (ids.some((id) => typeof id !== 'string' || !id.trim())) {
-      reply.code(400).send({ error: 'ids must be non-empty strings' })
-      return null
-    }
-    if (ids.length > MAX_BATCH_IDS) {
-      reply.code(400).send({ error: `too many ids (max ${MAX_BATCH_IDS})` })
-      return null
-    }
-    return ids as string[]
-  }
-
-  // 注册已屏蔽（站主在用户管理手动建号）；保留登录/找回
-  // 登录：账号维度限流在 account 服务内（5 次失败锁 5 分钟）；此处再按 IP 维度限流（20 次失败锁 10 分钟）
-  const loginIpFails = new Map<string, { fails: number; lockedUntil: number }>()
-  const LOGIN_IP_MAX = 20
-  const LOGIN_IP_LOCK_MS = 10 * 60_000
-  app.post(
-    '/api/auth/login',
-    {
-      schema: {
-        body: {
-          type: 'object',
-          required: ['username', 'password'],
-          properties: {
-            username: { type: 'string', minLength: 1, maxLength: 64 },
-            password: { type: 'string', minLength: 1, maxLength: 256 },
-          },
-        },
-      },
-    },
-    async (req, reply) => {
-    const ip = String((req as any).ip ?? 'unknown')
-    const now = Date.now()
-    const rec = loginIpFails.get(ip)
-    if (rec && rec.lockedUntil > now) {
-      const min = Math.max(1, Math.ceil((rec.lockedUntil - now) / 60_000))
-      return reply.code(429).send({ error: `登录尝试过于频繁，请 ${min} 分钟后再试`, code: 'E_LOGIN_LOCKED' })
-    }
-    const { username, password } = (req.body ?? {}) as { username?: string; password?: string }
-    try {
-      const r = await ctx.account.login(username ?? '', password ?? '')
-      loginIpFails.delete(ip)
-      audit({ action: 'auth.login', ok: true, user: r.user.username, ip })
-      return { token: r.token, user: r.user }
-    } catch (e: any) {
-      const next = loginIpFails.get(ip) ?? { fails: 0, lockedUntil: 0 }
-      next.fails += 1
-      if (next.fails >= LOGIN_IP_MAX) {
-        next.fails = 0
-        next.lockedUntil = Date.now() + LOGIN_IP_LOCK_MS
-      }
-      loginIpFails.set(ip, next)
-      audit({ action: 'auth.login', ok: false, user: username, ip, detail: { code: e?.code } })
-      const status = e?.code === 'E_LOGIN_LOCKED' ? 429 : 401
-      return reply.code(status).send({ error: e?.message ?? '登录失败', code: e?.code })
-    }
-  })
-
-  app.post('/api/auth/request-reset', async (req) => {
-    const { username } = (req.body ?? {}) as { username?: string }
-    const r = await ctx.account.requestReset(username ?? '')
-    // 已配置邮件：sent=true（不发纯文本令牌）；未配置则返回 resetToken 供演示/前端
-    return { sent: r?.sent ?? false, resetToken: r?.resetToken ?? null }
-  })
-
-  app.post('/api/auth/reset-password', async (req, reply) => {
-    const { resetToken, password } = (req.body ?? {}) as { resetToken?: string; password?: string }
-    const ok = await ctx.account.resetPassword(resetToken ?? '', password ?? '')
-    if (!ok) return reply.code(400).send({ error: '重置码无效或已过期' })
-    return { ok: true }
-  })
-
-  app.get('/api/auth/me', async (req) => {
-    const user = await ctx.account.me(tokenOf(req))
-    return { user }
-  })
-
-  app.post('/api/auth/logout', async (req) => {
-    await ctx.account.logout(tokenOf(req))
-    return { ok: true }
-  })
-
-  // ---- 用户自助修改资料（改用户名 / 改密码）----
-  app.post('/api/auth/profile', (req, reply) =>
-    requireUser(req, reply, async (user) => {
-      const body = req.body as { username?: string; oldPassword?: string; newPassword?: string }
-      try {
-        const updated = await ctx.account.updateProfile(user.id, {
-          username: body?.username,
-          oldPassword: body?.oldPassword,
-          newPassword: body?.newPassword,
-        })
-        return { user: updated }
-      } catch (e: any) {
-        return reply.code(400).send({ error: e.message })
-      }
-    }),
-  )
-
-  // ---- 站主管理用户 ----
-  app.get('/api/auth/users', (req, reply) => requireAdmin(req, reply, async () => ({ users: await ctx.account.listUsers() })))
-  app.post('/api/auth/users', (req, reply) =>
-    requireAdmin(req, reply, async () => {
-      const body = req.body as { username?: string; password?: string; role?: 'user' | 'admin'; groupIds?: string[] }
-      try {
-        const user = await ctx.account.createUser(
-          body?.username ?? '',
-          body?.password ?? '',
-          body?.role === 'admin' ? 'admin' : 'user',
-          body?.groupIds,
-        )
-        audit({ action: 'user.create', ok: true, user: await actorOf(req), ip: ipOf(req), target: user.username })
-        return reply.code(201).send({ user, users: await ctx.account.listUsers() })
-      } catch (e: any) {
-        return reply.code(400).send({ error: e.message })
-      }
-    }),
-  )
-  app.post('/api/auth/users/:id/disable', (req, reply) =>
-    requireAdmin(req, reply, async () => {
-      const id = (req.params as { id: string }).id
-      const body = req.body as { disabled?: boolean }
-      return { users: await ctx.account.disableUser(id, !!body?.disabled) }
-    }),
-  )
-  app.delete('/api/auth/users/:id', (req, reply) =>
-    requireAdmin(req, reply, async () => {
-      const id = (req.params as { id: string }).id
-      const users = await ctx.account.deleteUser(id)
-      audit({ action: 'user.delete', ok: true, user: await actorOf(req), ip: ipOf(req), target: id })
-      return { users }
-    }),
-  )
-  app.post('/api/auth/users/:id/role', (req, reply) =>
-    requireAdmin(req, reply, async () => {
-      const id = (req.params as { id: string }).id
-      const body = req.body as { role?: 'user' | 'admin' }
-      return { users: await ctx.account.setRole(id, body?.role === 'admin' ? 'admin' : 'user') }
-    }),
-  )
-
-  // 设置用户所属组（多组）
-  app.post('/api/auth/users/:id/groups', (req, reply) =>
-    requireAdmin(req, reply, async () => {
-      const id = (req.params as { id: string }).id
-      const body = req.body as { groupIds?: string[] }
-      try {
-        return { users: await ctx.account.setUserGroups(id, body?.groupIds ?? []) }
-      } catch (e: any) {
-        return reply.code(400).send({ error: e.message })
-      }
-    }),
-  )
-
-  // ---- 用户组管理（站主） ----
-  app.get('/api/groups', (req, reply) =>
-    requireAdmin(req, reply, async () => ({ groups: await ctx.account.listGroups() })),
-  )
-  app.post('/api/groups', (req, reply) =>
-    requireAdmin(req, reply, async () => {
-      const body = req.body as { name?: string; description?: string; parentId?: string }
-      try {
-        return { groups: await ctx.account.createGroup(body?.name ?? '', body?.description, body?.parentId) }
-      } catch (e: any) {
-        return reply.code(400).send({ error: e.message })
-      }
-    }),
-  )
-  app.post('/api/groups/:id/parent', (req, reply) =>
-    requireAdmin(req, reply, async () => {
-      const id = (req.params as { id: string }).id
-      const body = req.body as { parentId?: string | null }
-      try {
-        return { groups: await ctx.account.setGroupParent(id, body?.parentId ?? undefined) }
-      } catch (e: any) {
-        return reply.code(400).send({ error: e.message })
-      }
-    }),
-  )
-  app.patch('/api/groups/:id', (req, reply) =>
-    requireAdmin(req, reply, async () => {
-      const id = (req.params as { id: string }).id
-      const body = req.body as { name?: string }
-      try {
-        return { groups: await ctx.account.renameGroup(id, body?.name ?? '') }
-      } catch (e: any) {
-        return reply.code(400).send({ error: e.message })
-      }
-    }),
-  )
-  app.delete('/api/groups/:id', (req, reply) =>
-    requireAdmin(req, reply, async () => {
-      const id = (req.params as { id: string }).id
-      try {
-        return { groups: await ctx.account.deleteGroup(id) }
-      } catch (e: any) {
-        return reply.code(400).send({ error: e.message })
-      }
-    }),
-  )
-
+  // ---- 账号体系（已拆分到 routes/account.ts）----
+  registerAccountRoutes(app, ctx, routeDeps)
   // ---- 插件注册表（权限核心闭环） ----
   // 解析当前角色：仅从 Authorization Bearer token 解析真实用户角色；无有效会话一律 guest
   async function resolveRole(req: any): Promise<'guest' | 'user' | 'admin'> {
@@ -477,18 +217,6 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   )
 
   // 拆分模块共享依赖（P2-10）：统一注入，避免每个模块各传一套
-  const routeDeps: ApiRouteDeps = {
-    requireUser,
-    requireAdmin,
-    tokenOf,
-    audit,
-    ipOf,
-    actorOf,
-    viewerOf,
-    resolveViewer,
-    parseBatchIds,
-    normalizeVisibility,
-  }
   // ---- 插件商店 + 商店插件数据（已拆分到 routes/plugin-store.ts）----
   registerPluginStoreRoutes(app, ctx, routeDeps)
 
