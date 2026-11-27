@@ -256,12 +256,24 @@ docs/         需求 / 技术 / 验收文档
 - 新增 4 个测试（阈值过滤、silent、非法值回退、输出格式）。
 - **验证**：`LOG_LEVEL=warn` 启动临时实例 → **info 行 0 条、warn 行正常输出**；`pnpm test` 39/39。
 
+### ✅ P2-8 写操作审计日志（2026-11-28）
+- `@ikit/shared` 新增 `createAuditLog()`：**JSON Lines**（每行一条），默认 `./data/audit.jsonl`；`AUDIT_LOG_FILE` 覆盖、`AUDIT_LOG=off` 关闭；写入串行化（Promise 链）、失败只告警不影响请求、字段长度裁剪。
+- API 挂载（`ApiMeta.audit`）：
+  - `auth.login`（成功/失败，含 IP 与错误码）
+  - `user.create` / `user.delete`
+  - `knowledge.delete`（软删除）
+  - `plugin.install`（成功/失败）/ `plugin.uninstall`
+  - `shiguang.passcode.set` / `shiguang.passcode.reset`
+- 记录字段：`ts / action / ok / user / ip / target / detail`。
+- **验证**：`tmp/verify-audit.mjs` **14/14 PASS**（7 类动作均落盘，记录含时间/用户/IP/目标）。
+- 待补：回收站彻底删除/清空、批量删除/移动、发布/撤回、权限与用户组变更、插件 update/import。
+
 ### 待处理
-- P2-8 写操作审计日志；
 - P2-9 ESLint/Prettier（依赖离线不可得，待网络可用时引入）；
 - P2-10 拆分巨型文件（`routes.ts`/`App.vue`/`DocCuratorPanel.vue`/`ArticleEditView.vue`）；
 - P2-11 其余写接口补 schema；
-- P2-5 CSP（Report-Only）与 httpOnly 迁移评估。
+- P2-5 CSP（Report-Only）与 httpOnly 迁移评估；
+- P2-8 其余写操作补审计。
 
 ---
 

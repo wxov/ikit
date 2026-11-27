@@ -5,7 +5,7 @@ import fastifyStatic from '@fastify/static'
 import type { WebSocket } from 'ws'
 import type { Context } from 'cordis'
 import { createBus } from './bus.js'
-import { createLogger } from '@ikit/shared'
+import { createAuditLog, createLogger } from '@ikit/shared'
 import { registerRoutes, type ApiMeta } from './routes.js'
 
 const log = createLogger('api')
@@ -93,7 +93,9 @@ export async function createApi(ctx: Context, meta: ApiMeta = {}): Promise<Fasti
     })
   })
 
-  registerRoutes(app, ctx, meta)
+  // 写操作审计（P2-8）：默认 ./data/audit.jsonl，AUDIT_LOG=off 关闭，AUDIT_LOG_FILE 可覆盖
+  const audit = createAuditLog()
+  registerRoutes(app, ctx, { ...meta, audit })
 
   // 热更新分发包静态托管（/update/<version>/<bundle>）
   if (meta.updateRoot) {

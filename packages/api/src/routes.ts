@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { Context } from 'cordis'
 import type { ChatMessage, EntryVisibility, KnowledgeEntryInput, Viewer, VisibilitySyncMode } from '@ikit/core'
+import type { AuditEvent, AuditLog } from '@ikit/shared'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
@@ -20,9 +21,22 @@ export interface ApiMeta {
   updateRoot?: string
   /** 上传文件目录（图片等，通过 /uploads/<file> 访问） */
   uploadsDir?: string
+  /** 写操作审计（P2-8）；未提供时审计调用为空操作 */
+  audit?: AuditLog
 }
 
 export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta = {}) {
+  /** 审计写入（无 audit 时为空操作；永不抛错影响请求） */
+  const audit = (event: AuditEvent): void => meta.audit?.write(event)
+  const ipOf = (req: any): string => String(req?.ip ?? '')
+  /** 解析操作者用户名（仅 admin 路由需要；按需查询，失败不影响主流程） */
+  const actorOf = async (req: any): Promise<string | undefined> => {
+    try {
+      return (await ctx.account.me(tokenOf(req)))?.username
+    } catch {
+      return undefined
+    }
+  }
   app.get('/api/health', async () => ({
     ok: true,
     uptime: Math.round(process.uptime()),
@@ -247,6 +261,7 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     try {
       const r = await ctx.account.login(username ?? '', password ?? '')
       loginIpFails.delete(ip)
+      audit({ action: 'auth.login', ok: true, user: r.user.username, ip })
       return { token: r.token, user: r.user }
     } catch (e: any) {
       const next = loginIpFails.get(ip) ?? { fails: 0, lockedUntil: 0 }
@@ -256,6 +271,7 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
         next.lockedUntil = Date.now() + LOGIN_IP_LOCK_MS
       }
       loginIpFails.set(ip, next)
+      audit({ action: 'auth.login', ok: false, user: username, ip, detail: { code: e?.code } })
       const status = e?.code === 'E_LOGIN_LOCKED' ? 429 : 401
       return reply.code(status).send({ error: e?.message ?? '登录失败', code: e?.code })
     }
@@ -314,6 +330,7 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
           body?.role === 'admin' ? 'admin' : 'user',
           body?.groupIds,
         )
+        audit({ action: 'user.create', ok: true, user: await actorOf(req), ip: ipOf(req), target: user.username })
         return reply.code(201).send({ user, users: await ctx.account.listUsers() })
       } catch (e: any) {
         return reply.code(400).send({ error: e.message })
@@ -330,7 +347,9 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   app.delete('/api/auth/users/:id', (req, reply) =>
     requireAdmin(req, reply, async () => {
       const id = (req.params as { id: string }).id
-      return { users: await ctx.account.deleteUser(id) }
+      const users = await ctx.account.deleteUser(id)
+      audit({ action: 'user.delete', ok: true, user: await actorOf(req), ip: ipOf(req), target: id })
+      return { users }
     }),
   )
   app.post('/api/auth/users/:id/role', (req, reply) =>
@@ -500,8 +519,17 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
         | undefined
       try {
         const { plugins, scan, signature } = await ctx.pluginRegistry.install(body ?? {})
+        audit({
+          action: 'plugin.install',
+          ok: true,
+          user: await actorOf(req),
+          ip: ipOf(req),
+          target: body?.name ?? body?.packageUrl,
+          detail: { packageUrl: body?.packageUrl, warnings: scan?.warnings?.length ?? 0 },
+        })
         return { plugins, store: ctx.pluginRegistry.store(), scan, signature }
       } catch (e: any) {
+        audit({ action: 'plugin.install', ok: false, user: await actorOf(req), ip: ipOf(req), target: body?.name, detail: { code: e?.code } })
         return reply.code(400).send({ error: e?.message || '安装失败', code: e?.code })
       }
     }),
@@ -574,6 +602,7 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     requireAdmin(req, reply, async () => {
       const name = (req.params as { name: string }).name
       const plugins = await ctx.pluginRegistry.uninstall(name)
+      audit({ action: 'plugin.uninstall', ok: true, user: await actorOf(req), ip: ipOf(req), target: name })
       return { plugins, store: ctx.pluginRegistry.store() }
     }),
   )
@@ -690,12 +719,14 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
       },
     },
     (req, reply) =>
-    requireUser(req, reply, async () => {
+    requireUser(req, reply, async (user) => {
       const body = (req.body ?? {}) as { oldPasscode?: string; newPasscode?: string }
       try {
         await ctx.shiguang.setPasscode({ oldPasscode: body.oldPasscode, newPasscode: String(body.newPasscode ?? '') })
+        audit({ action: 'shiguang.passcode.set', ok: true, user: user.username, ip: ipOf(req) })
         return { ok: true }
       } catch (e: any) {
+        audit({ action: 'shiguang.passcode.set', ok: false, user: user.username, ip: ipOf(req), detail: { code: e?.code } })
         reply.code(400)
         return { error: e?.message ?? '设置失败', code: e?.code }
       }
@@ -706,6 +737,7 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
   app.post('/api/shiguang/passcode/reset', (req, reply) =>
     requireAdmin(req, reply, async () => {
       await ctx.shiguang.resetPasscode()
+      audit({ action: 'shiguang.passcode.reset', ok: true, user: await actorOf(req), ip: ipOf(req) })
       return { ok: true }
     }),
   )
@@ -1065,6 +1097,7 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
       const id = (req.params as { id: string }).id
       const ok = await ctx.knowledge.remove(id)
       if (!ok) return reply.code(404).send({ error: 'entry not found' })
+      audit({ action: 'knowledge.delete', ok: true, user: await actorOf(req), ip: ipOf(req), target: id, detail: { soft: true } })
       return { ok: true }
     }),
   )
