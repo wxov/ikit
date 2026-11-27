@@ -419,14 +419,24 @@ async function newSession() {
   }
 }
 
-async function deleteSession(id: string) {
-  if (!confirm('删除该会话及其历史记录？')) return
+// 删除会话：用应用内确认弹窗替代 window.confirm（桌面/移动 webview 会屏蔽原生 confirm → 点击无反应）
+const confirmDeleteId = ref('')
+
+function askDeleteSession(id: string) {
+  error.value = ''
+  confirmDeleteId.value = id
+}
+
+async function doDeleteSession() {
+  const id = confirmDeleteId.value
+  if (!id || loading.value) return
   try {
     const r = await api<{ sessions: AgentSession[] }>(`/api/agent/sessions/${id}`, {
       method: 'DELETE',
       headers: authHeaders(),
     })
     sessions.value = r.sessions
+    confirmDeleteId.value = ''
     if (currentId.value === id) {
       currentId.value = sessions.value[0]?.id ?? ''
       syncModelFromSession()
@@ -655,7 +665,7 @@ onMounted(async () => {
         >
           <span class="sess-title" @click="selectSession(s.id)">{{ s.title }}</span>
           <button class="sess-btn" title="重命名" @click.stop="renamingId = s.id; renameInput = s.title">✎</button>
-          <button class="sess-btn danger" title="删除" @click.stop="deleteSession(s.id)">×</button>
+          <button class="sess-btn danger" title="删除" @click.stop="askDeleteSession(s.id)">×</button>
         </div>
         <div v-if="renamingId" class="sess-rename">
           <input v-model="renameInput" class="sess-input" placeholder="会话名称" @keydown.enter="renameSession(renamingId)" />
@@ -815,6 +825,23 @@ onMounted(async () => {
           <div class="mc-actions">
             <button class="mc-btn primary" @click="applyFetch">加入所选</button>
             <button class="mc-btn" @click="fetchOpen = false">取消</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 删除会话确认：应用内弹窗（替代 window.confirm） -->
+    <Teleport to="body">
+      <div v-if="confirmDeleteId" class="sess-modal-mask" @click.self="confirmDeleteId = ''">
+        <div class="sess-modal" role="dialog" aria-label="确认删除会话">
+          <div class="sess-modal-title">删除该会话？</div>
+          <div class="sess-modal-body">会话及其历史记录将被永久删除，不可恢复。</div>
+          <div v-if="error" class="sess-modal-error">{{ error }}</div>
+          <div class="sess-modal-actions">
+            <button class="sess-modal-btn" :disabled="loading" @click="confirmDeleteId = ''">取消</button>
+            <button class="sess-modal-btn danger" :disabled="loading" @click="doDeleteSession">
+              {{ loading ? '删除中…' : '确认删除' }}
+            </button>
           </div>
         </div>
       </div>
@@ -1271,4 +1298,25 @@ onMounted(async () => {
 }
 .ap-actions { display: flex; gap: 8px; }
 .ap-state { font-size: 12px; color: var(--muted); }
+/* ---- 删除会话确认弹窗（应用内，2026-11-28） ---- */
+.sess-modal-mask {
+  position: fixed; inset: 0; z-index: 1200;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.sess-modal {
+  width: min(400px, 100%);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+  padding: 18px 18px 14px; box-shadow: 0 24px 60px rgba(15, 23, 42, 0.35);
+}
+.sess-modal-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.sess-modal-body { margin-top: 8px; font-size: 13px; line-height: 1.7; color: var(--muted); }
+.sess-modal-error { margin-top: 8px; font-size: 12px; color: var(--danger); }
+.sess-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.sess-modal-btn {
+  padding: 6px 14px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel); color: var(--text); font-size: 13px; font-family: inherit; cursor: pointer;
+}
+.sess-modal-btn.danger { border-color: var(--danger); background: var(--danger); color: #fff; }
+.sess-modal-btn:disabled { opacity: 0.6; cursor: default; }
 </style>
