@@ -609,6 +609,100 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
     }),
   )
 
+  // ---- 拾光（日记 / 感悟 / 名言，开门密码保护）----
+  const shiguangTokenOf = (req: any) => String(req.headers?.['x-shiguang-token'] ?? '')
+  /** 校验解锁令牌；不通过时直接回 401 并返回 false（调用方 return 即可） */
+  function requireUnlock(req: any, reply: any): boolean {
+    if (ctx.shiguang.verify(shiguangTokenOf(req))) return true
+    reply.code(401).send({ error: '需要先解锁拾光', code: 'E_LOCKED' })
+    return false
+  }
+
+  app.get('/api/shiguang/status', (req, reply) =>
+    requireUser(req, reply, async () => ctx.shiguang.status()),
+  )
+
+  app.put('/api/shiguang/passcode', (req, reply) =>
+    requireUser(req, reply, async () => {
+      const body = (req.body ?? {}) as { oldPasscode?: string; newPasscode?: string }
+      try {
+        await ctx.shiguang.setPasscode({ oldPasscode: body.oldPasscode, newPasscode: String(body.newPasscode ?? '') })
+        return { ok: true }
+      } catch (e: any) {
+        reply.code(400)
+        return { error: e?.message ?? '设置失败', code: e?.code }
+      }
+    }),
+  )
+
+  app.post('/api/shiguang/unlock', (req, reply) =>
+    requireUser(req, reply, async () => {
+      const { passcode } = (req.body ?? {}) as { passcode?: string }
+      try {
+        return await ctx.shiguang.unlock(String(passcode ?? ''))
+      } catch (e: any) {
+        reply.code(e?.code === 'E_LOCKED_OUT' ? 429 : 401)
+        return { error: e?.message ?? '解锁失败', code: e?.code }
+      }
+    }),
+  )
+
+  app.post('/api/shiguang/lock', (req, reply) =>
+    requireUser(req, reply, async () => {
+      ctx.shiguang.lock(shiguangTokenOf(req))
+      return { ok: true }
+    }),
+  )
+
+  app.get('/api/shiguang/entries', (req, reply) =>
+    requireUser(req, reply, async () => {
+      if (!requireUnlock(req, reply)) return
+      const type = (req.query as { type?: string })?.type
+      return { entries: await ctx.shiguang.list(type as any) }
+    }),
+  )
+
+  app.post('/api/shiguang/entries', (req, reply) =>
+    requireUser(req, reply, async () => {
+      if (!requireUnlock(req, reply)) return
+      const body = (req.body ?? {}) as Record<string, unknown>
+      try {
+        return { entry: await ctx.shiguang.add(body as any) }
+      } catch (e: any) {
+        reply.code(400)
+        return { error: e?.message ?? '保存失败', code: e?.code }
+      }
+    }),
+  )
+
+  app.patch('/api/shiguang/entries/:id', (req, reply) =>
+    requireUser(req, reply, async () => {
+      if (!requireUnlock(req, reply)) return
+      const id = (req.params as { id: string }).id
+      const body = (req.body ?? {}) as Record<string, unknown>
+      try {
+        return { entry: await ctx.shiguang.update(id, body as any) }
+      } catch (e: any) {
+        reply.code(e?.code === 'E_NOT_FOUND' ? 404 : 400)
+        return { error: e?.message ?? '更新失败', code: e?.code }
+      }
+    }),
+  )
+
+  app.delete('/api/shiguang/entries/:id', (req, reply) =>
+    requireUser(req, reply, async () => {
+      if (!requireUnlock(req, reply)) return
+      const id = (req.params as { id: string }).id
+      try {
+        await ctx.shiguang.remove(id)
+        return { ok: true }
+      } catch (e: any) {
+        reply.code(e?.code === 'E_NOT_FOUND' ? 404 : 400)
+        return { error: e?.message ?? '删除失败', code: e?.code }
+      }
+    }),
+  )
+
   // ---- demo 插件服务 ----
   app.get('/api/demo/hello', async (req) => {
     const name = (req.query as { name?: string }).name

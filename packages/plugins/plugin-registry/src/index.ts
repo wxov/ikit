@@ -86,6 +86,17 @@ export function apply(ctx: Context, config: Config) {
       visibleGroups: ['guest', 'user', 'admin'],
       panel: 'agent',
     },
+    {
+      // 拾光：日记 / 感悟 / 名言（默认内置；开门密码保护，默认仅站主可见，可在插件管理调整用户组）
+      name: 'shiguang',
+      title: '拾光',
+      version: '1.0.0',
+      enabled: true,
+      builtin: true,
+      order: 3,
+      visibleGroups: ['admin'],
+      panel: 'shiguang',
+    },
   ]
 
   const registry = createPluginRegistry(store, defaults, {

@@ -121,6 +121,9 @@ importers:
       '@ikit/plugin-registry':
         specifier: workspace:*
         version: link:../plugins/plugin-registry
+      '@ikit/plugin-shiguang':
+        specifier: workspace:*
+        version: link:../plugins/shiguang
       '@ikit/plugin-store-data':
         specifier: workspace:*
         version: link:../plugins/store-data
@@ -217,6 +220,19 @@ importers:
       adm-zip:
         specifier: 0.6.0
         version: 0.6.0
+      cordis:
+        specifier: ^3.18.1
+        version: 3.18.1
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/plugins/shiguang:
+    dependencies:
       cordis:
         specifier: ^3.18.1
         version: 3.18.1

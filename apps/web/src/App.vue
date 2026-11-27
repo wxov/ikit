@@ -18,6 +18,7 @@ import {
 import type { PluginRecord, PluginRole, VisiblePlugins } from './lib/plugins'
 import SystemPanel from './components/SystemPanel.vue'
 import DocCuratorPanel from './components/DocCuratorPanel.vue'
+import ShiguangPanel from './components/ShiguangPanel.vue'
 import PluginSettings from './components/PluginSettings.vue'
 import PluginStore from './components/PluginStore.vue'
 import StorePluginPanel from './components/StorePluginPanel.vue'
@@ -960,6 +961,7 @@ onUnmounted(() => {
         />
         <SystemPanel v-else-if="tab === 'system' && user?.role === 'admin'" />
         <DocCuratorPanel v-else-if="tab === 'agent'" />
+        <ShiguangPanel v-else-if="tab === 'shiguang'" />
         <ArchiveView v-else-if="tab === 'archive'" @open="onOpenEntry" />
         <TrashView v-else-if="tab === 'trash'" @open="onOpenEntry" />
         <StorePluginPanel v-else-if="isStorePlugin(tab)" :panel="tab" />

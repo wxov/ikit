@@ -84,6 +84,9 @@ async function main() {
     storeData: {
       dataDir: './data',
     },
+    shiguang: {
+      dataDir: './data',
+    },
     agent: {
       dataDir: './data',
       // 写类工具（新增/修改文档）等待确认的超时；测试时可用环境变量缩短

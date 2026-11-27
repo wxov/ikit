@@ -134,6 +134,7 @@ pnpm dev:web
 ### 域名访问与下载中心
 
 - **域名白名单**：站点与 API 只允许 `WEB_ALLOWED_HOSTS`（默认 `ayioiya.com` / `ikit.ayioiya.com` / `www.ayioiya.com`）；`/update/*` 额外允许 `WEB_DOWNLOAD_HOSTS`（默认 `download.ayioiya.com`）；其他 Host 返回 403。本地开发默认放行 localhost（`WEB_ALLOW_LOCALHOST=0` 关闭），排障可 `WEB_HOST_GUARD=0` 临时关闭。
+- **拾光（默认内置）**：日记 / 感悟 / 名言三合一，带**开门密码**（scrypt 哈希、解锁令牌仅存服务端内存、刷新即锁、连错 5 次锁 60 秒）
 - **编辑区与阅读端一致**：站主编辑态排版镜像阅读端；编辑态为飞书式块编辑：无工具栏、无选区浮条、正文零内边距，光标行左侧手柄弹窗承载「格式」（加粗/斜体/删除线/行内代码/链接/图片/互链/撤销/重做/全屏）+「编辑样式」+ 上移/下移/复制/删除
 - **文档右侧目录**：阅读端正文右侧显示目录（层级缩进、滚动高亮、点击定位）；站主编辑端为同款 DocToc；窄屏自动隐藏。
 - **下载中心**：设置 →「下载」显示当前版本与 Windows / Android / Web 热更新包地址（`GET /api/update/downloads`），可一键打开或复制链接。
