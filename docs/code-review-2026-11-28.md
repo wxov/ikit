@@ -268,23 +268,28 @@ docs/         需求 / 技术 / 验收文档
 - **验证**：`tmp/verify-audit.mjs` **14/14 PASS**（7 类动作均落盘，记录含时间/用户/IP/目标）。
 - 待补：回收站彻底删除/清空、批量删除/移动、发布/撤回、权限与用户组变更、插件 update/import。
 
-### 🟡 P2-10 拆分巨型文件（进行中：`routes.ts` 三步拆分，2026-11-28）
-- `packages/api/src/routes.ts`：**1648 → 652 行**（累计 −60%）；抽出 6 个模块：
+### 🟡 P2-10 拆分巨型文件（进行中：`routes.ts` 后端拆分基本完成，2026-11-28）
+- `packages/api/src/routes.ts`：**1648 → 265 行**（累计 **−84%**）；抽出 8 个模块：
   | 模块 | 行数 | 内容 |
   |---|---|---|
-  | `routes/deps.ts` | 31 | `ApiRouteDeps` 注入契约（含 viewerOf/resolveViewer/parseBatchIds/normalizeVisibility/callOf/resolveAgentModel） |
-  | `routes/auth-helpers.ts` | 114 | `createAuthHelpers(ctx)` 工厂：tokenOf / requireUser / requireAdmin / viewerOf / resolveViewer / callOf / resolveAgentModel / parseBatchIds / normalizeVisibility |
-  | `routes/account.ts` | 196 | 账号体系 + 用户管理 + 用户组（16 个 `/api/auth*`、`/api/groups*`） |
-  | `routes/knowledge.ts` | 344 | 知识库 / 评论 / 批量 / 回收站 / 分类 / 可见性（24 个 `/api/knowledge*`） |
-  | `routes/plugin-store.ts` | 225 | 插件商店 + 商店插件数据 |
-  | `routes/shiguang.ts` | 204 | 拾光 + AI 润色 |
-- `routes.ts` 内 `const auth = createAuthHelpers(ctx)` + 单个 `routeDeps` 统一注入；**代码原样搬运，行为不变**。
-- **验证**：
-  - 拆分一（plugin-store/shiguang）**16/16 PASS**
-  - 拆分二（knowledge）**17/17 PASS**
-  - 拆分三（auth-helpers + account）**17/17 PASS**（登录/登出/me/找回/改资料/用户与用户组 CRUD）
+  | `routes/deps.ts` | 31 | `ApiRouteDeps` 注入契约 |
+  | `routes/auth-helpers.ts` | 114 | `createAuthHelpers(ctx)`：鉴权 / 可见性 / Agent 调用上下文 |
+  | `routes/account.ts` | 196 | 账号 + 用户管理 + 用户组（16 路由） |
+  | `routes/knowledge.ts` | 344 | 知识库 / 评论 / 批量 / 回收站 / 分类 / 可见性（24 路由） |
+  | `routes/plugin-store.ts` | 225 | 插件商店 + 商店插件数据（9 路由） |
+  | `routes/shiguang.ts` | 204 | 拾光 + AI 润色（10 路由） |
+  | `routes/agent.ts` | 302 | Agent 工具 / 会话 / 节点 / 远程任务（18 路由） |
+  | `routes/llm.ts` | 108 | LLM 模型清单 / 拉取 / 原始流式（3 路由） |
+- `routes.ts` 内 `createAuthHelpers(ctx)` + 单个 `routeDeps` 统一注入，8 个模块通过 `registerXxxRoutes(app, ctx, routeDeps)` 注册；**代码原样搬运，行为不变**。
+- **验证**（四轮拆分累计回归冒烟）：
+  | 拆分 | 用例 | 结果 |
+  |---|---|---|
+  | plugin-store / shiguang | 16 | ✅ 16/16 |
+  | knowledge | 17 | ✅ 17/17 |
+  | auth-helpers / account | 17 | ✅ 17/17 |
+  | agent / LLM | 18 | ✅ 18/18 |
   - `pnpm -r build` 通过；`pnpm test` 42/42
-- 后续：`routes.ts` 剩余 `插件注册表 / demo / 上传 / agent / LLM`（~652 行）→ 目标 ~250 行；前端 `App.vue`（1562）/ `DocCuratorPanel.vue`（1322）/ `ArticleEditView.vue`（1294）。
+- 后续：前端 `App.vue`（1562）/ `DocCuratorPanel.vue`（1322）/ `ArticleEditView.vue`（1294）；`routes.ts` 剩余（插件注册表 / demo / 上传 / health / 下载中心 / 系统信息）按需再拆。
 
 ### 待处理
 - P2-9 ESLint/Prettier（依赖离线不可得，待网络可用时引入）；
