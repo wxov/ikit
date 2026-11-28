@@ -48,6 +48,9 @@ const confirmDeleteId = ref('')
 const polishing = ref(false)
 const polishResult = ref('')
 const polishError = ref('')
+/** 润色强度 / 风格（2026-11-28）：日记更适合轻/标准，感悟可深 */
+const polishIntensity = ref<'light' | 'standard' | 'deep'>('standard')
+const polishStyle = ref<'plain' | 'literary'>('plain')
 
 function resetPolish() {
   polishResult.value = ''
@@ -64,7 +67,12 @@ async function doPolish() {
     const r = await api<{ text: string }>('/api/shiguang/polish', {
       method: 'POST',
       headers: hdrs(),
-      body: JSON.stringify({ type: v.type, content: v.content }),
+      body: JSON.stringify({
+        type: v.type,
+        content: v.content,
+        intensity: polishIntensity.value,
+        style: polishStyle.value,
+      }),
     })
     polishResult.value = r.text
   } catch (e: any) {
@@ -445,6 +453,25 @@ onMounted(loadStatus)
           >
             {{ polishing ? '润色中…' : '✨ AI 润色' }}
           </button>
+          <select
+            v-if="editing.type !== 'quote'"
+            v-model="polishIntensity"
+            class="sg-select"
+            title="润色强度：轻=只做必要修整，标准=默认，深=可补细节与层次"
+          >
+            <option value="light">强度·轻</option>
+            <option value="standard">强度·标准</option>
+            <option value="deep">强度·深</option>
+          </select>
+          <select
+            v-if="editing.type !== 'quote'"
+            v-model="polishStyle"
+            class="sg-select"
+            title="润色风格"
+          >
+            <option value="plain">风格·朴素</option>
+            <option value="literary">风格·文艺</option>
+          </select>
           <span v-else class="sg-hint">名言不支持 AI 润色</span>
         </div>
         <div v-if="polishResult || polishError" class="sg-polish">

@@ -34,9 +34,56 @@ export interface Config {
 export const Config: Schema<Config> = Schema.object({
   dataDir: Schema.string().default('./data'),
   filename: Schema.string().default('agent.json'),
-  systemPrompt: Schema.string().default(
-    '你是「小知」（英文名 DocCurator），i-kit 知识库的文档管理员：负责整理、归类、检索与维护知识库文档。当用户的问题涉及需要查询的事实、资料或文档时，优先调用 knowledge_search 工具检索知识库；如果知识库中没有相关内容，再基于自身知识回答。若用户要求新增或修改文档，调用 knowledge_add / knowledge_update（执行前系统会请用户确认，确认后才会真正写入）。',
-  ),
+  systemPrompt: Schema.string().default(`<role>
+你是「小知」（DocCurator），i-kit 知识库的文档管理员与写作搭档。你熟悉站主的文档习惯：中文、简洁、重结构、少套话。
+</role>
+
+<responsibilities>
+1) 检索与答疑：先查库再回答；库里有就引用，没有就明说。
+2) 整理与归类：合并重复、拆分长文、补标签与上级文档。
+3) 写作与改写：新建/续写/修改在库文档（执行前系统会请站主确认）。
+4) 站务协助：解释功能与操作路径，不臆测系统行为。
+</responsibilities>
+
+<tool_discipline>
+- knowledge_search：问题涉及「站内资料 / 我之前写过 / 文档里有没有」时必须先检索；闲聊、常识、计算不必检索。
+- 检索一次不够时，换更具体的关键词最多再试 1 次；仍无结果就回答「知识库中没有相关内容」，并说明可以怎么补录。
+- web_fetch：仅当用户明确要求「查网上 / 最新 / 对比外部资料」时使用；一次对话最多抓 2 个链接。
+- knowledge_add / knowledge_update：执行前先用一句话说明将改什么；不确定目标文档时先 knowledge_search 确认，不要凭标题猜。
+- 工具报错：翻译成用户能理解的一句话并给出下一步（换关键词 / 补标题 / 稍后重试），不要原样抛出错误栈。
+</tool_discipline>
+
+<answer_style>
+- 默认中文；先给结论，再给依据或步骤；能用 3 句说清就不写 10 句。
+- 引用知识库时标注来源，如「参考《Cordis 插件框架》」。
+- 列表不超过 7 条；代码或命令用代码块；不主动使用 emoji。
+- 不确定就说不确定，并说明还缺什么信息。
+</answer_style>
+
+<boundaries>
+- 不编造文档内容、不虚构引用、不替用户做未经确认的发布或删除。
+- 涉及权限（草稿 / 私密 / 用户组）时按调用者可见性说话，不暗示他人文档存在。
+- 不输出与任务无关的长篇背景。
+</boundaries>
+
+<examples>
+<example>
+用户：知识库里有没有讲 Cordis 插件依赖注入的？
+小知：先调用 knowledge_search 检索「Cordis 依赖注入」；有结果则给 2–3 句结论并标注《标题》，没有则回答「知识库中没有相关内容」并建议补录。
+</example>
+<example>
+用户：帮我把重复的笔记合并一下。
+小知：先检索候选并列出「保留 / 合并 / 拆分」方案，等用户确认后再逐条调用 knowledge_update；不要一次性大改。
+</example>
+<example>
+用户：写一篇《Vite 构建优化》放进技术/前端。
+小知：先给 3–6 节提纲（含代码块位置），确认后用 knowledge_add 写入草稿，再询问是否发布。
+</example>
+<example>
+用户：把别人的私密文档删掉。
+小知：说明没有权限、也看不到该文档，并给出替代路径（联系站主 / 让站主操作），不调用任何写工具。
+</example>
+</examples>`),
   maxSteps: Schema.number().default(10),
   knowledgeTopK: Schema.number().default(3),
   enableWriteTools: Schema.boolean().default(true),
@@ -74,11 +121,14 @@ export function apply(_ctx: Context, config: Config) {
   registerTool({
     name: 'knowledge_search',
     description:
-      '在本地知识库中检索相关内容，返回匹配的条目。当用户询问需要事实、资料或文档支撑的问题时使用。',
+      '在站主的知识库中做语义/关键词混合检索，返回最相关的若干条目（标题 + 正文）。' +
+      '何时用：用户问「文档里有没有…」「我之前写过…」，或需要引用站内资料支撑回答时。' +
+      '何时不用：纯常识、计算、闲聊；用户明确要求联网时改用 web_fetch。' +
+      '失败处理：返回「知识库中没有找到相关内容」时，换更具体的关键词再试一次；仍失败就直说没有，并建议补录。',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '检索关键词或问题' },
+        query: { type: 'string', description: '检索关键词或问题，尽量具体（如「Cordis 依赖注入」而不是「那个框架」）' },
       },
       required: ['query'],
     },
@@ -98,7 +148,10 @@ export function apply(_ctx: Context, config: Config) {
   // 内置工具：当前时间（演示简单工具）
   registerTool({
     name: 'current_time',
-    description: '获取当前日期和时间',
+    description:
+      '返回服务器当前日期时间（Asia/Shanghai）。' +
+      '何时用：用户问「现在几点 / 今天几号」，或需要以当前时间做推算（如倒计时）时。' +
+      '何时不用：与时间无关的普通问题，不要为了「确认时间」额外调用。',
     parameters: { type: 'object', properties: {} },
     handler: async () =>
       new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }),
@@ -107,7 +160,11 @@ export function apply(_ctx: Context, config: Config) {
   // 内置工具：抓取网页（浏览器控制简化版，返回标题 + 纯文本摘要）
   registerTool({
     name: 'web_fetch',
-    description: '抓取指定网页并返回标题与纯文本摘要。用于查询网页内容、文档或公开资料。',
+    description:
+      '抓取指定网页并返回标题与纯文本摘要（服务端安全抓取，拒绝内网/本机地址，单页上限 1MB）。' +
+      '何时用：用户明确要求「查网上资料 / 最新动态 / 对比外部文档」，且知识库没有相关内容时。' +
+      '何时不用：站内问题优先 knowledge_search；一次对话最多抓 2 个链接，不要抓取搜索结果页或需要登录的页面。' +
+      '失败处理：返回「抓取失败 / 请求失败 HTTP xxx」时，直接说明该链接不可用并给出替代建议，不要重复重试。',
     parameters: {
       type: 'object',
       properties: {
@@ -178,12 +235,15 @@ export function apply(_ctx: Context, config: Config) {
     registerTool({
       name: 'knowledge_add',
       description:
-        '向知识库新增一篇文档（标题 + Markdown 正文；可选分类/父文档/标签/可见性/发布状态）。属于写操作：仅站主可用，且执行前需用户确认。',
+        '向知识库新增一篇文档（标题 + Markdown 正文；可选分类/父文档/标签/可见性/发布状态）。' +
+        '何时用：用户明确要求「新建 / 写一篇 / 存到知识库」，且已有足够内容或提纲时。' +
+        '何时不用：只想讨论思路时先给提纲；修改已有文档用 knowledge_update。' +
+        '注意：属于写操作，仅站主可用，执行前系统会请用户确认；status 缺省为草稿，发布需用户明确同意。',
       parameters: {
         type: 'object',
         properties: {
-          title: { type: 'string', description: '文档标题' },
-          content: { type: 'string', description: '正文（Markdown）' },
+          title: { type: 'string', description: '文档标题（必填，非空）' },
+          content: { type: 'string', description: '正文（Markdown，可含代码块；发布时不可为空）' },
           category: { type: 'string', description: '分类路径，如 技术/前端（可选）' },
           parentId: { type: 'string', description: '父文档 id（可选，缺省为顶层）' },
           tags: { type: 'array', items: { type: 'string' }, description: '标签（可选）' },
@@ -229,14 +289,17 @@ export function apply(_ctx: Context, config: Config) {
     registerTool({
       name: 'knowledge_update',
       description:
-        '修改知识库中的一篇文档：可按 id 或标题匹配目标，改标题/正文（替换或追加）/分类/标签/可见性/发布状态。属于写操作：仅站主可用，且执行前需用户确认；不支持移动、删除。',
+        '修改知识库中的一篇文档：可按 id 或标题匹配目标，改标题/正文（替换或追加）/分类/标签/可见性/发布状态。' +
+        '何时用：用户要求「改 / 补充 / 续写 / 调整分类或标签」已有文档时；先用 knowledge_search 或 id 确认目标。' +
+        '何时不用：创建新文档用 knowledge_add；删除/移动不支持，请让用户在界面操作。' +
+        '硬约束：用户没有给出完整新正文时，优先 append 或只改字段，**禁止整篇 replace**；执行前系统会请用户确认。',
       parameters: {
         type: 'object',
         properties: {
           id: { type: 'string', description: '目标文档 id（可选；与 matchTitle 二选一）' },
           matchTitle: { type: 'string', description: '目标文档标题（可选；按标题精确/包含匹配）' },
           title: { type: 'string', description: '新的标题（可选）' },
-          content: { type: 'string', description: '正文内容（配合 mode 使用）' },
+          content: { type: 'string', description: '正文内容（配合 mode 使用；replace 会整篇覆盖，慎用）' },
           mode: {
             type: 'string',
             enum: ['replace', 'append'],

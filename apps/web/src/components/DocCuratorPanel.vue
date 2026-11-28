@@ -340,6 +340,48 @@ function scrollToBottom() {
   })
 }
 
+// ---- 输入提示词润色（「✨优化」，2026-11-28）：**手动触发**，不自动改写 ----
+const polishBusy = ref(false)
+const polishError = ref('')
+const polishCard = ref<{ prompt: string; added: string[]; degraded: boolean } | null>(null)
+const polishDraft = ref('')
+
+async function doPromptPolish() {
+  const text = input.value.trim()
+  if (!loggedIn.value || !text || polishBusy.value) return
+  polishBusy.value = true
+  polishError.value = ''
+  polishCard.value = null
+  try {
+    const sessionTitle = sessions.value.find((s) => s.id === currentId.value)?.title ?? ''
+    const r = await api<{ prompt: string; added: string[]; intent: string; degraded: boolean }>('/api/agent/prompt-polish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ text, context: sessionTitle }),
+    })
+    polishDraft.value = r.prompt || text
+    polishCard.value = { prompt: r.prompt || text, added: r.added ?? [], degraded: !!r.degraded }
+  } catch (e: any) {
+    polishError.value = e?.message ?? String(e)
+  } finally {
+    polishBusy.value = false
+  }
+}
+
+/** 采用优化后的提示词并直接发送 */
+function usePolishedPrompt() {
+  if (!polishCard.value) return
+  input.value = polishDraft.value
+  polishCard.value = null
+  polishError.value = ''
+  void send()
+}
+
+function closePolishCard() {
+  polishCard.value = null
+  polishError.value = ''
+}
+
 /** 写操作确认卡片：参数预览（超长截断） */
 function approvalArgsText(args: Record<string, unknown>): string {
   let s = ''
@@ -521,8 +563,34 @@ onMounted(async () => {
         style="flex: 1; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; resize: vertical; min-height: 44px; font-family: inherit"
         @keydown.enter.exact.prevent="send"
       />
+      <button
+        v-if="!loading"
+        class="btn secondary"
+        :disabled="polishBusy || !input.trim()"
+        title="把这句话补全成更清晰的指令（仅在你点击时执行）"
+        @click="doPromptPolish"
+      >
+        {{ polishBusy ? '优化中…' : '✨ 优化' }}
+      </button>
       <button v-if="!loading" class="btn" @click="send">发送</button>
       <button v-else class="btn danger" @click="stop">停止</button>
+    </div>
+
+    <!-- 提示词优化结果卡片：可编辑后「用这个发送」 -->
+    <div v-if="polishCard || polishError" class="polish-card">
+      <div class="polish-head">
+        ✨ 优化后的提示词
+        <span v-if="polishCard?.degraded" class="polish-warn">（未能优化，可直接发送原文）</span>
+      </div>
+      <div v-if="polishError" class="polish-err">{{ polishError }}</div>
+      <template v-else>
+        <textarea v-model="polishDraft" class="polish-draft" rows="3" />
+        <div v-if="polishCard?.added?.length" class="polish-added">补充：{{ polishCard.added.join('；') }}</div>
+        <div class="polish-actions">
+          <button class="btn secondary sm" @click="closePolishCard">取消</button>
+          <button class="btn sm" @click="usePolishedPrompt">用这个发送</button>
+        </div>
+      </template>
     </div>
 
     <!-- 模型配置（站主，小知面板内）：按供应商分组（参考 CC Switch）；Teleport 到 body 避免被面板裁剪 -->
@@ -1110,4 +1178,28 @@ onMounted(async () => {
 }
 .sess-modal-btn.danger { border-color: var(--danger); background: var(--danger); color: #fff; }
 .sess-modal-btn:disabled { opacity: 0.6; cursor: default; }
+/* ---- 输入提示词润色卡片（✨优化，2026-11-28）---- */
+.polish-card {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft, rgba(0, 0, 0, 0.02));
+}
+.polish-head { font-size: 12px; font-weight: 600; color: var(--primary-dark, var(--primary)); margin-bottom: 6px; }
+.polish-warn { font-weight: 400; color: var(--warning, #b45309); }
+.polish-err { font-size: 12px; color: var(--danger, #dc2626); }
+.polish-draft {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+}
+.polish-added { margin-top: 6px; font-size: 12px; color: var(--text-muted, #6b7280); }
+.polish-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 </style>

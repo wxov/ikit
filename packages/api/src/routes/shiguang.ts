@@ -2,6 +2,12 @@
 import type { FastifyInstance } from 'fastify'
 import type { Context } from 'cordis'
 import type { ApiRouteDeps } from './deps.js'
+import {
+  buildPolishPrompt,
+  normalizePolishIntensity,
+  normalizePolishStyle,
+  normalizePolishType,
+} from './shiguang-polish.js'
 
 export function registerShiguangRoutes(app: FastifyInstance, ctx: Context, deps: ApiRouteDeps): void {
   const { requireAdmin, requireUser, audit, ipOf, actorOf } = deps
@@ -158,8 +164,13 @@ export function registerShiguangRoutes(app: FastifyInstance, ctx: Context, deps:
   app.post('/api/shiguang/polish', (req, reply) =>
     requireUser(req, reply, async () => {
       if (!requireUnlock(req, reply)) return
-      const body = (req.body ?? {}) as { type?: string; content?: string }
-      const type = body.type === 'diary' || body.type === 'insight' ? body.type : ''
+      const body = (req.body ?? {}) as {
+        type?: string
+        content?: string
+        intensity?: string
+        style?: string
+      }
+      const type = normalizePolishType(body.type)
       const content = typeof body.content === 'string' ? body.content.trim() : ''
       if (!type) {
         reply.code(400)
@@ -173,19 +184,17 @@ export function registerShiguangRoutes(app: FastifyInstance, ctx: Context, deps:
         reply.code(400)
         return { error: '内容过长（最多 4000 字）' }
       }
+      const intensity = normalizePolishIntensity(body.intensity)
+      const style = normalizePolishStyle(body.style)
       const kind = type === 'diary' ? '日记' : '感悟'
-      const system =
-        '你是中文写作润色助手。请在不改变原意、不虚构事实、不添加原文没有的信息的前提下润色用户的文字：' +
-        '让表达更通顺、自然、有分寸，修正错别字与语病，调整节奏；保留第一人称与作者的个人语气；' +
-        '日记保持真实、口语化的质感；感悟保持凝练、克制。' +
-        '只输出润色后的正文，不要任何解释、标题、引号或 Markdown 代码块包裹。'
+      const prompt = buildPolishPrompt(type, intensity, style)
       try {
         const res = await ctx.llm.chat(
           [
-            { role: 'system', content: system },
+            { role: 'system', content: prompt.system },
             { role: 'user', content: `【类型】${kind}\n【原文】\n${content}` },
           ],
-          { temperature: 0.6, maxTokens: 1600 },
+          { temperature: prompt.temperature, maxTokens: prompt.maxTokens },
         )
         let text = String(res.message?.content ?? '').trim()
         // 去掉模型偶尔带上的代码块/引号包裹
@@ -195,7 +204,7 @@ export function registerShiguangRoutes(app: FastifyInstance, ctx: Context, deps:
           reply.code(502)
           return { error: '润色结果为空，请重试' }
         }
-        return { text }
+        return { text, intensity, style }
       } catch (e: any) {
         reply.code(502)
         return { error: e?.message ?? 'AI 润色失败', code: 'E_POLISH_FAILED' }

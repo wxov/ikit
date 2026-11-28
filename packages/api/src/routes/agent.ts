@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import type { Context } from 'cordis'
 import type { ChatMessage } from '@ikit/core'
 import type { ApiRouteDeps } from './deps.js'
+import { buildPromptPolishMessages, parsePromptPolishOutput } from './prompt-polish.js'
 
 export function registerAgentRoutes(app: FastifyInstance, ctx: Context, deps: ApiRouteDeps): void {
   const { requireUser, callOf, resolveAgentModel } = deps
@@ -13,6 +14,39 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: Context, deps: Ap
     requireUser(req, reply, async () => ({
       tools: ctx.agent.listTools(),
     })),
+  )
+
+  // ---- 输入提示词润色（小知「✨优化」，2026-11-28）：把口语输入改写为结构化指令（手动触发）----
+  app.post(
+    '/api/agent/prompt-polish',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['text'],
+          properties: {
+            text: { type: 'string', minLength: 1, maxLength: 2000 },
+            context: { type: 'string', maxLength: 200 },
+          },
+        },
+      },
+    },
+    (req, reply) =>
+      requireUser(req, reply, async () => {
+        const body = req.body as { text: string; context?: string }
+        const text = String(body.text ?? '').trim()
+        if (!text) return { prompt: '', added: [], intent: 'other' as const, degraded: true }
+        try {
+          const res = await ctx.llm.chat(buildPromptPolishMessages(text, body.context), {
+            temperature: 0.2,
+            maxTokens: 400,
+          })
+          return parsePromptPolishOutput(String(res.message?.content ?? ''), text)
+        } catch (e: any) {
+          reply.code(502)
+          return { error: e?.message ?? '优化失败', code: 'E_POLISH_FAILED' }
+        }
+      }),
   )
 
   // 执行一个服务端工具（节点本地 agent 循环复用服务端工具时调用；登录鉴权）
