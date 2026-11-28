@@ -2,8 +2,10 @@
 import type { FastifyInstance } from 'fastify'
 import type { Context } from 'cordis'
 import type { ChatMessage } from '@ikit/core'
+import { summaryContextText } from '@ikit/plugin-agent'
 import type { ApiRouteDeps } from './deps.js'
 import { buildPromptPolishMessages, parsePromptPolishOutput } from './prompt-polish.js'
+import { loadAiSettings, resolveSkillVariant } from '../ai-settings.js'
 
 export function registerAgentRoutes(app: FastifyInstance, ctx: Context, deps: ApiRouteDeps): void {
   const { requireUser, callOf, resolveAgentModel } = deps
@@ -17,10 +19,16 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: Context, deps: Ap
   )
 
   // 技能索引（2026-11-28 M2）：只返回名字/标题/触发条件，正文由 use_skill 按需加载
+  // M3：额外回显当前用户的技能变体（A/B）
   app.get('/api/agent/skills', (req, reply) =>
-    requireUser(req, reply, async () => ({
-      skills: ctx.agent.listSkills(),
-    })),
+    requireUser(req, reply, async (user) => {
+      const ai = loadAiSettings()
+      return {
+        skills: ctx.agent.listSkills(),
+        variant: resolveSkillVariant(user?.id, ai.skillVariant) ?? null,
+        variantMode: ai.skillVariant,
+      }
+    }),
   )
 
   // ---- 输入提示词润色（小知「✨优化」，2026-11-28）：把口语输入改写为结构化指令（手动触发）----
@@ -41,6 +49,11 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: Context, deps: Ap
     (req, reply) =>
       requireUser(req, reply, async () => {
         const body = req.body as { text: string; context?: string }
+        const ai = loadAiSettings()
+        if (!ai.promptPolish) {
+          reply.code(400)
+          return { error: '提示词优化已在 AI 设置中关闭', code: 'E_DISABLED' }
+        }
         const text = String(body.text ?? '').trim()
         if (!text) return { prompt: '', added: [], intent: 'other' as const, degraded: true }
         try {
@@ -258,10 +271,14 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: Context, deps: Ap
       if (!picked.ok) return reply.code(400).send({ error: picked.error })
       await ctx.agent.setSessionModel(user.id, id, picked.rec.id)
 
-      // 持久化用户消息，并用之前的消息作为历史
+      // 持久化用户消息；历史 = 摘要（若有）+ 最近 keep 条，去掉刚追加的本条
       await ctx.agent.appendMessage(user.id, id, { role: 'user', content: body.message })
-      const fullHistory = await ctx.agent.historyOf(user.id, id)
-      const priorHistory = fullHistory.slice(0, -1)
+      const ai = loadAiSettings()
+      const prior = await ctx.agent.contextOf(user.id, id, ai.summaryKeep)
+      const priorHistory: ChatMessage[] = [
+        ...(prior.summary ? [{ role: 'system' as const, content: summaryContextText(prior.summary) }] : []),
+        ...prior.messages.slice(0, -1),
+      ]
 
       const raw = reply.raw
       raw.writeHead(200, {
@@ -286,6 +303,10 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: Context, deps: Ap
           raw.write(`data: ${JSON.stringify(ev)}\n\n`)
         }
         await ctx.agent.appendMessage(user.id, id, { role: 'assistant', content: assistantContent, steps })
+        // 较早对话压缩（异步、失败不影响本次回答）
+        void ctx.agent
+          .summarizeSession(user.id, id, { threshold: ai.summaryThreshold, keep: ai.summaryKeep })
+          .catch(() => {})
       } catch (e) {
         raw.write(
           `data: ${JSON.stringify({ type: 'error', error: e instanceof Error ? e.message : String(e) })}\n\n`,

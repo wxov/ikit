@@ -13,6 +13,7 @@ import { createAuthHelpers } from './routes/auth-helpers.js'
 import { registerAccountRoutes } from './routes/account.js'
 import { registerAgentRoutes } from './routes/agent.js'
 import { registerLlmRoutes } from './routes/llm.js'
+import { registerAiSettingsRoutes } from './routes/ai-settings.js'
 
 // 批量导入文档单次上限（超出直接 400，避免一次请求写入过多条目）
 
@@ -165,6 +166,7 @@ export function registerRoutes(app: FastifyInstance, ctx: Context, meta: ApiMeta
 
   // ---- 账号体系（已拆分到 routes/account.ts）----
   registerAccountRoutes(app, ctx, routeDeps)
+  registerAiSettingsRoutes(app, ctx, routeDeps)
   // ---- 插件注册表（权限核心闭环） ----
   // 解析当前角色：仅从 Authorization Bearer token 解析真实用户角色；无有效会话一律 guest
   async function resolveRole(req: any): Promise<'guest' | 'user' | 'admin'> {

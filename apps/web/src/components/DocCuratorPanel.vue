@@ -55,6 +55,10 @@ const renameInput = ref('')
 const chatEl = ref<HTMLElement | null>(null)
 let abortController: AbortController | null = null
 
+/** 当前会话与摘要状态（M3：较早对话压缩提示） */
+const currentSession = computed(() => sessions.value.find((s) => s.id === currentId.value))
+const hasSummary = computed(() => !!currentSession.value?.summary)
+
 // ---- 模型选择 / 模型配置（P2-10）：逻辑抽到 composables/useAgentModels.ts ----
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
 const {
@@ -511,6 +515,9 @@ onMounted(async () => {
     <div v-if="statusText" class="agent-status">{{ statusText }}</div>
 
     <div v-if="loggedIn" ref="chatEl" class="chat">
+      <div v-if="hasSummary" class="sess-summary-hint">
+        较早对话已压缩为摘要{{ currentSession?.summaryCount ? `（${currentSession.summaryCount} 条）` : '' }}
+      </div>
       <div v-if="!messages.length" class="empty">
         我是小知，i-kit 知识库的文档管家。<br />
         可以帮你检索资料、整理归类，也能新增或修改文档——写入前会先请你确认。<br />
@@ -1202,4 +1209,5 @@ onMounted(async () => {
 }
 .polish-added { margin-top: 6px; font-size: 12px; color: var(--text-muted, #6b7280); }
 .polish-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.sess-summary-hint { margin: 8px 0; padding: 6px 10px; font-size: 12px; color: var(--text-muted, #6b7280); background: var(--bg-soft, rgba(0, 0, 0, 0.03)); border-radius: 6px; }
 </style>

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { SKILLS, findSkill, skillIndexText, skillList } from './skills.js'
+import { SKILLS, SKILL_VARIANTS, findSkill, skillIndexText, skillList, variantBody } from './skills.js'
 
 test('技能：首批 4 个，描述与正文符合长度约束', () => {
   assert.equal(SKILLS.length, 4)
@@ -32,4 +32,23 @@ test('技能：清单不含正文（供 API/UI）', () => {
   const list = skillList()
   assert.equal(list.length, 4)
   assert.ok(list.every((s) => !('body' in s)))
+})
+
+test('技能变体：doc_writer 与 knowledge_curator 各两版，长度合规且互不相同', () => {
+  for (const name of ['doc_writer', 'knowledge_curator']) {
+    const v = SKILL_VARIANTS[name]
+    assert.ok(v?.a && v?.b, `${name} 应有 a/b 两版`)
+    assert.ok(v.a!.length <= 1500 && v.b!.length <= 1500, `${name} 变体 ≤1500 字`)
+    assert.notEqual(v.a, v.b)
+    const base = SKILLS.find((s) => s.name === name)?.body
+    assert.notEqual(v.a, base)
+    assert.notEqual(v.b, base)
+  }
+})
+
+test('技能变体：variantBody 未配置/未指定时回落', () => {
+  assert.equal(variantBody('doc_writer', 'a'), SKILL_VARIANTS.doc_writer.a)
+  assert.equal(variantBody('doc_writer', undefined), undefined)
+  assert.equal(variantBody('daily_assistant', 'a'), undefined)
+  assert.equal(variantBody('nope', 'b'), undefined)
 })

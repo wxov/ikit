@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { Schema } from 'cordis'
-import { findSkill, skillIndexText, skillList, SKILLS } from './skills.js'
+import { findSkill, skillIndexText, skillList, variantBody, SKILLS } from './skills.js'
+import { buildSummaryMessages, transcriptOf } from './context.js'
+
+export { summaryContextText } from './context.js'
 import { createLogger, safeFetchText } from '@ikit/shared'
 import type { Context } from 'cordis'
 import type { ChatMessage, LlmChatOptions, LlmService, LlmToolDefinition } from '@ikit/plugin-llm'
@@ -227,8 +230,10 @@ export function apply(_ctx: Context, config: Config) {
       if (skill.requiresAdmin && call?.role !== 'admin') {
         return '错误：该技能仅站主可用。'
       }
-      log.info(`[agent] use_skill ${skill.name} by user ${call?.userId ?? '(unknown)'}`)
-      return `【技能：${skill.title}（${skill.name} ${skill.version}）】\n${skill.body}`
+      const variant = call?.skillVariant
+      const body = variantBody(skill.name, variant) ?? skill.body
+      log.info(`[agent] use_skill ${skill.name}${variant ? ` (variant ${variant})` : ''} by user ${call?.userId ?? '(unknown)'}`)
+      return `【技能：${skill.title}（${skill.name} ${skill.version}${variant ? ` · 变体 ${variant.toUpperCase()}` : ''}）】\n${body}`
     },
   })
 
@@ -660,6 +665,60 @@ export function apply(_ctx: Context, config: Config) {
     return msgs.map((m) => ({ role: m.role, content: m.content }))
   }
 
+  /** 会话上下文：摘要 + 最近 keep 条消息（M3） */
+  async function contextOf(
+    ownerId: string,
+    sessionId: string,
+    keep = 8,
+  ): Promise<{ summary?: string; messages: ChatMessage[] }> {
+    const session = await getSession(ownerId, sessionId)
+    if (!session) return { messages: [] }
+    const all = await historyOf(ownerId, sessionId)
+    return { summary: session.summary, messages: keep > 0 ? all.slice(-keep) : all }
+  }
+
+  /**
+   * 压缩较早对话为摘要（M3）：消息数 > threshold 时，把「除最近 keep 条以外」的对话交给 LLM 压缩；
+   * 失败只记日志、不写摘要（绝不丢消息）；幂等标记 summaryUpTo。
+   */
+  async function summarizeSession(
+    ownerId: string,
+    sessionId: string,
+    opts: { threshold?: number; keep?: number } = {},
+  ): Promise<{ summarized: boolean; count?: number }> {
+    const threshold = opts.threshold ?? 16
+    const keep = opts.keep ?? 8
+    const session = await getSession(ownerId, sessionId)
+    if (!session) return { summarized: false }
+    const msgs = await listMessages(ownerId, sessionId)
+    if (msgs.length <= threshold) return { summarized: false }
+    const cut = Math.max(0, msgs.length - keep)
+    const oldest = msgs.slice(0, cut)
+    if (!oldest.length) return { summarized: false }
+    // 已压缩过同样范围则跳过（summaryUpTo 之后的才是新内容）
+    if (session.summaryUpTo && oldest[oldest.length - 1].id === session.summaryUpTo) return { summarized: false }
+
+    try {
+      const transcript = transcriptOf(oldest.map((m) => ({ role: m.role, content: m.content })))
+      const res = await ctx.llm.chat(buildSummaryMessages(transcript), { temperature: 0.2, maxTokens: 320 })
+      const summary = String(res.message?.content ?? '').trim().slice(0, 300)
+      if (!summary) return { summarized: false }
+      const db = await loadDb()
+      const s = db.sessions.find((x) => x.id === sessionId && x.ownerId === ownerId)
+      if (!s) return { summarized: false }
+      s.summary = summary
+      s.summaryUpTo = oldest[oldest.length - 1].id
+      s.summaryCount = oldest.length
+      s.summaryUpdatedAt = new Date().toISOString()
+      await store.save(db)
+      log.info(`[agent] summary ${sessionId}: ${oldest.length} msgs -> ${summary.length} chars`)
+      return { summarized: true, count: oldest.length }
+    } catch (e) {
+      log.warn('[agent] summarize failed:', e instanceof Error ? e.message : e)
+      return { summarized: false }
+    }
+  }
+
   async function listNodes(): Promise<AgentNode[]> {
     const db = await loadDb()
     return (db.nodes ?? [])
@@ -777,6 +836,8 @@ export function apply(_ctx: Context, config: Config) {
     appendMessage,
     getSession,
     historyOf,
+    contextOf,
+    summarizeSession,
     migrateLegacySessions,
     listNodes,
     registerNode,

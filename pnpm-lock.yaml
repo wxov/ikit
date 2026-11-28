@@ -108,6 +108,9 @@ importers:
       '@ikit/core':
         specifier: workspace:*
         version: link:../core
+      '@ikit/plugin-agent':
+        specifier: workspace:*
+        version: link:../plugins/agent
       '@ikit/shared':
         specifier: workspace:*
         version: link:../shared

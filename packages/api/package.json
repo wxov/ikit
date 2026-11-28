@@ -14,7 +14,8 @@
     "@ikit/core": "workspace:*",
     "cordis": "^3.18.1",
     "fastify": "^5.12.1",
-    "@ikit/shared": "workspace:*"
+    "@ikit/shared": "workspace:*",
+    "@ikit/plugin-agent": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

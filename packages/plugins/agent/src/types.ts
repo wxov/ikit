@@ -13,6 +13,8 @@ export interface AgentCallContext {
   userId?: string
   /** 调用者角色（写类工具据此鉴权：仅站主可用；缺省按普通用户处理） */
   role?: 'user' | 'admin'
+  /** 技能变体（2026-11-28 M3 A/B）：由 API 层按设置与 userId 解析 */
+  skillVariant?: 'a' | 'b'
 }
 
 export interface AgentTool {
@@ -63,6 +65,14 @@ export interface AgentSession {
   title: string
   /** 该会话选用的模型记录 id（llm 模型清单里的一条；缺省 = 默认模型） */
   model?: string
+  /** 较早对话的摘要（2026-11-28 M3）：存在时作为 system 背景注入，替代原始历史 */
+  summary?: string
+  /** 已压缩到的最后一条消息 id（幂等/去重用） */
+  summaryUpTo?: string
+  /** 已压缩的消息条数（用于前端「已压缩 N 条」提示） */
+  summaryCount?: number
+  /** 摘要更新时间 */
+  summaryUpdatedAt?: string
   createdAt: string
   updatedAt: string
 }
@@ -153,6 +163,18 @@ export interface AgentService {
   getSession(ownerId: string, id: string): Promise<AgentSession | undefined>
   /** 会话历史 → 供 LLM 的 ChatMessage 序列 */
   historyOf(ownerId: string, sessionId: string): Promise<ChatMessage[]>
+  /** 会话上下文：摘要 + 最近 keep 条消息（2026-11-28 M3） */
+  contextOf(
+    ownerId: string,
+    sessionId: string,
+    keep?: number,
+  ): Promise<{ summary?: string; messages: ChatMessage[] }>
+  /** 压缩较早对话为摘要（消息数 > threshold 时触发；失败不抛错、不写摘要） */
+  summarizeSession(
+    ownerId: string,
+    sessionId: string,
+    opts?: { threshold?: number; keep?: number },
+  ): Promise<{ summarized: boolean; count?: number }>
   /** 存量会话迁移（懒触发、幂等）：无 ownerId 的会话归属 admin 首账号；无 admin 则清空并告警 */
   migrateLegacySessions(): Promise<{ migrated: number; cleared: number }>
   /** 节点注册/发现/心跳 */

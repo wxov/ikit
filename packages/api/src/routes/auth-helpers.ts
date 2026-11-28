@@ -4,6 +4,7 @@
 // 抽成工厂后：routes.ts 与各子模块都通过 createAuthHelpers(ctx) 获得**同一份**实现，
 // 避免拆分后各模块复制导致行为漂移。
 import type { EntryVisibility, Viewer } from '@ikit/core'
+import { loadAiSettings, resolveSkillVariant } from '../ai-settings.js'
 
  
 const MAX_BATCH_IDS = 500
@@ -12,6 +13,8 @@ export interface AgentCall {
   viewer: Viewer
   userId?: string
   role: 'user' | 'admin'
+  /** 技能变体（M3 A/B；由设置 + userId 解析） */
+  skillVariant?: 'a' | 'b'
 }
 
 export interface AuthHelpers {
@@ -67,11 +70,13 @@ export function createAuthHelpers(ctx: any): AuthHelpers {
 
   // user → Agent 调用上下文（完善④）：viewer 由「调用者」解析，与 HTTP 知识库接口同源
   async function callOf(user: any): Promise<AgentCall> {
+    const ai = loadAiSettings()
     return {
       viewer: await viewerOf(user),
       userId: user?.id as string | undefined,
       // 写类工具（knowledge_add/knowledge_update）据此鉴权：仅站主可用
       role: (user?.role === 'admin' ? 'admin' : 'user') as 'user' | 'admin',
+      skillVariant: resolveSkillVariant(user?.id as string | undefined, ai.skillVariant),
     }
   }
 

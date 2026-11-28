@@ -9,6 +9,7 @@ import {
   normalizePolishStyle,
   normalizePolishType,
 } from './shiguang-polish.js'
+import { loadAiSettings } from '../ai-settings.js'
 
 export function registerShiguangRoutes(app: FastifyInstance, ctx: Context, deps: ApiRouteDeps): void {
   const { requireAdmin, requireUser, audit, ipOf, actorOf } = deps
@@ -187,9 +188,10 @@ export function registerShiguangRoutes(app: FastifyInstance, ctx: Context, deps:
         reply.code(400)
         return { error: '内容过长（最多 4000 字）' }
       }
-      const intensity = normalizePolishIntensity(body.intensity)
-      const style = normalizePolishStyle(body.style)
-      const variants: 1 | 2 = body.variants === 2 ? 2 : 1
+      const ai = loadAiSettings()
+      const intensity = normalizePolishIntensity(body.intensity ?? ai.polishIntensity)
+      const style = normalizePolishStyle(body.style ?? ai.polishStyle)
+      const variants: 1 | 2 = (body.variants ?? ai.dualVariantsDefault) === 2 ? 2 : 1
       const section = body.section && (body.section.before || body.section.after) ? body.section : null
       const mode = section ? 'section' : 'full'
       const kind = type === 'diary' ? '日记' : '感悟'

@@ -1,10 +1,44 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, inject, onMounted, ref, type Ref } from 'vue'
 import { api } from '../lib/api'
 import { fetchUpdateManifest, hasUpdate as hasUpdateFn, detectPlatform, type UpdateInfo } from '../lib/update'
+import { fetchAiSettings, updateAiSettings, type AiSettings } from '../lib/aiSettings'
 
 const emit = defineEmits<{ (e: 'close'): void; (e: 'request-update', info: UpdateInfo): void }>()
-const tab = ref<'update' | 'about' | 'download' | 'help'>('update')
+const role = inject<Ref<string>>('userRole', ref('guest'))
+const isAdmin = computed(() => role.value === 'admin')
+const tab = ref<'update' | 'about' | 'download' | 'help' | 'ai'>('update')
+const ai = ref<AiSettings | null>(null)
+const aiLoading = ref(false)
+const aiSaving = ref(false)
+const aiNotice = ref('')
+
+async function loadAi() {
+  aiLoading.value = true
+  aiNotice.value = ''
+  try {
+    const r = await fetchAiSettings()
+    ai.value = r.settings
+  } catch (e: any) {
+    aiNotice.value = e?.message ?? String(e)
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+async function saveAi() {
+  if (!ai.value) return
+  aiSaving.value = true
+  aiNotice.value = ''
+  try {
+    ai.value = await updateAiSettings({ ...ai.value })
+    aiNotice.value = '已保存，立即生效'
+  } catch (e: any) {
+    aiNotice.value = e?.message ?? String(e)
+  } finally {
+    aiSaving.value = false
+  }
+}
 const info = ref<UpdateInfo | null>(null)
 const checking = ref(false)
 const checked = ref(false)
@@ -111,6 +145,7 @@ const FAQS: Array<[string, string]> = [
         <button :class="{ on: tab === 'update' }" @click="tab = 'update'">检查更新</button>
         <button :class="{ on: tab === 'about' }" @click="tab = 'about'">关于</button>
         <button :class="{ on: tab === 'download' }" @click="tab = 'download'; loadDownloads()">下载</button>
+        <button v-if="isAdmin" :class="{ on: tab === 'ai' }" @click="tab = 'ai'; loadAi()">AI</button>
         <button :class="{ on: tab === 'help' }" @click="tab = 'help'">帮助</button>
       </nav>
 
@@ -171,6 +206,63 @@ const FAQS: Array<[string, string]> = [
             </div>
           </div>
           <div v-if="downloadError" class="dl-error">❌ {{ downloadError }}</div>
+        </div>
+      </section>
+
+      <!-- AI 设置（仅站主，2026-11-28 M3） -->
+      <section v-else-if="tab === 'ai'" class="st-body">
+        <p class="dl-hint">
+          仅站主可见。修改后立即生效：提示词优化开关、技能 A/B、会话摘要阈值、拾光默认强度/风格/候选数。
+        </p>
+        <div v-if="aiLoading" class="dl-hint">加载中…</div>
+        <div v-else-if="ai" class="ai-form">
+          <label class="ai-row">
+            <span>提示词优化（✨优化）</span>
+            <input v-model="ai.promptPolish" type="checkbox" />
+          </label>
+          <label class="ai-row">
+            <span>技能 A/B</span>
+            <select v-model="ai.skillVariant" class="ai-select">
+              <option value="off">关闭</option>
+              <option value="a">全部 A</option>
+              <option value="b">全部 B</option>
+              <option value="auto">自动 50/50</option>
+            </select>
+          </label>
+          <label class="ai-row">
+            <span>会话摘要阈值（条）</span>
+            <input v-model.number="ai.summaryThreshold" class="ai-input" type="number" min="4" max="100" />
+          </label>
+          <label class="ai-row">
+            <span>摘要保留最近（条）</span>
+            <input v-model.number="ai.summaryKeep" class="ai-input" type="number" min="2" max="40" />
+          </label>
+          <label class="ai-row">
+            <span>拾光默认强度</span>
+            <select v-model="ai.polishIntensity" class="ai-select">
+              <option value="light">轻</option>
+              <option value="standard">标准</option>
+              <option value="deep">深</option>
+            </select>
+          </label>
+          <label class="ai-row">
+            <span>拾光默认风格</span>
+            <select v-model="ai.polishStyle" class="ai-select">
+              <option value="plain">朴素</option>
+              <option value="literary">文艺</option>
+            </select>
+          </label>
+          <label class="ai-row">
+            <span>拾光默认候选</span>
+            <select v-model.number="ai.dualVariantsDefault" class="ai-select">
+              <option :value="1">单版</option>
+              <option :value="2">双版对比</option>
+            </select>
+          </label>
+          <div class="ai-actions">
+            <button class="st-btn" :disabled="aiSaving" @click="saveAi">{{ aiSaving ? '保存中…' : '保存' }}</button>
+            <span v-if="aiNotice" class="dl-hint">{{ aiNotice }}</span>
+          </div>
         </div>
       </section>
 
@@ -263,4 +355,10 @@ const FAQS: Array<[string, string]> = [
   .dl-item { flex-direction: column; align-items: stretch; }
   .dl-actions { justify-content: flex-end; }
 }
+/* ---- AI 设置（2026-11-28 M3）---- */
+.ai-form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.ai-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
+.ai-select, .ai-input { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 13px; min-width: 120px; }
+.ai-input { width: 90px; min-width: 0; }
+.ai-actions { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
 </style>

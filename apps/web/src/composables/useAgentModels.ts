@@ -11,6 +11,11 @@ export interface AgentSession {
   title: string
   /** 该会话选用的模型（llm 模型清单记录 id；缺省 = 默认模型） */
   model?: string
+  /** 较早对话摘要（2026-11-28 M3） */
+  summary?: string
+  summaryUpTo?: string
+  summaryCount?: number
+  summaryUpdatedAt?: string
   createdAt: string
   updatedAt: string
 }
