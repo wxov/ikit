@@ -1,4 +1,5 @@
 import type { ChatMessage, LlmChatOptions } from '@ikit/plugin-llm'
+import type { AgentSkill } from './skills.js'
 import type { Viewer } from '@ikit/plugin-knowledge'
 
 /**
@@ -128,6 +129,8 @@ export interface AgentTaskInput {
 export interface AgentService {
   registerTool(tool: AgentTool): () => void
   listTools(): AgentToolInfo[]
+  /** 技能索引（不含正文，供 API/UI 展示） */
+  listSkills(): Array<Omit<AgentSkill, 'body'>>
   runTool(name: string, args: Record<string, unknown>, call?: AgentCallContext): Promise<string>
   /** 审批一个等待确认的写操作（callId 来自 SSE 的 approval 事件）；返回是否命中待审批项 */
   resolveApproval(callId: string, approved: boolean): boolean

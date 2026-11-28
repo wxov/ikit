@@ -4,6 +4,7 @@ import {
   buildPolishPrompt,
   normalizePolishIntensity,
   normalizePolishStyle,
+  nextIntensity,
   normalizePolishType,
 } from './shiguang-polish.js'
 
@@ -45,4 +46,18 @@ test('拾光润色：入参归一化', () => {
   assert.equal(normalizePolishIntensity('nonsense'), 'standard')
   assert.equal(normalizePolishStyle('literary'), 'literary')
   assert.equal(normalizePolishStyle(''), 'plain')
+})
+
+test('拾光润色：段落级模式只润色选中段', () => {
+  const p = buildPolishPrompt('diary', 'standard', 'plain', 'section')
+  assert.match(p.system, /只润色【选中段】/)
+  assert.match(p.system, /不要改写上下文/)
+  const full = buildPolishPrompt('diary', 'standard', 'plain', 'full')
+  assert.match(full.system, /整篇润色/)
+})
+
+test('拾光润色：双候选的第二版强度递进', () => {
+  assert.equal(nextIntensity('light'), 'standard')
+  assert.equal(nextIntensity('standard'), 'deep')
+  assert.equal(nextIntensity('deep'), 'deep')
 })

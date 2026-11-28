@@ -16,6 +16,13 @@ export function registerAgentRoutes(app: FastifyInstance, ctx: Context, deps: Ap
     })),
   )
 
+  // 技能索引（2026-11-28 M2）：只返回名字/标题/触发条件，正文由 use_skill 按需加载
+  app.get('/api/agent/skills', (req, reply) =>
+    requireUser(req, reply, async () => ({
+      skills: ctx.agent.listSkills(),
+    })),
+  )
+
   // ---- 输入提示词润色（小知「✨优化」，2026-11-28）：把口语输入改写为结构化指令（手动触发）----
   app.post(
     '/api/agent/prompt-polish',

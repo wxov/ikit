@@ -5,6 +5,8 @@
 export type PolishType = 'diary' | 'insight'
 export type PolishIntensity = 'light' | 'standard' | 'deep'
 export type PolishStyle = 'plain' | 'literary'
+/** full=整篇润色；section=只润色选中段（上下文仅供参考） */
+export type PolishMode = 'full' | 'section'
 
 export const POLISH_PROMPT_VERSION = 'v2'
 
@@ -50,8 +52,18 @@ export function normalizePolishStyle(v: unknown): PolishStyle {
   return v === 'literary' ? 'literary' : 'plain'
 }
 
+/** 双候选用：第二版比第一版更"深"一档（deep 保持 deep，靠温度差异） */
+export function nextIntensity(v: PolishIntensity): PolishIntensity {
+  return v === 'light' ? 'standard' : 'deep'
+}
+
 /** 构建 system prompt 与采样参数（温度/上限按类型与强度） */
-export function buildPolishPrompt(type: PolishType, intensity: PolishIntensity, style: PolishStyle): PolishPrompt {
+export function buildPolishPrompt(
+  type: PolishType,
+  intensity: PolishIntensity,
+  style: PolishStyle,
+  mode: PolishMode = 'full',
+): PolishPrompt {
   const kind = type === 'diary' ? '日记' : '感悟'
   const rules = type === 'diary' ? DIARY_RULES : INSIGHT_RULES
   const styleClause = style === 'literary' ? LITERARY_CLAUSE : PLAIN_CLAUSE
@@ -64,6 +76,12 @@ export function buildPolishPrompt(type: PolishType, intensity: PolishIntensity, 
 - 保留第一人称与作者口吻；不把作者改造成别人。
 - 只输出正文，不要解释、标题、引号或 Markdown 代码块包裹。
 </硬约束>
+
+<scope>
+${mode === 'section'
+      ? '只润色【选中段】：上文/下文仅用于理解语气、指代与衔接，不要改写上下文，不要把上下文并入输出。输出只包含选中段润色后的文字。'
+      : '整篇润色：保持原文段落顺序与段落划分，不要合并或新增段落。'}
+</scope>
 
 <style_card>
 类型：${kind}

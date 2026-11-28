@@ -1,0 +1,61 @@
+{
+  "shiguang": [
+    {
+      "name": "日记-日常琐事",
+      "type": "diary",
+      "intensity": "standard",
+      "style": "plain",
+      "mode": "full",
+      "content": "今天去超市买东西，人很多，排队排了很久，有点累。",
+      "expect": ["场景落地", "感官细节", "口语与短句", "去作文腔"]
+    },
+    {
+      "name": "感悟-哲思",
+      "type": "insight",
+      "intensity": "deep",
+      "style": "literary",
+      "mode": "full",
+      "content": "最近发现越是着急想做好一件事，反而越做不好。",
+      "expect": ["概念提炼", "因果/张力", "隐喻克制", "留白", "文笔优先"]
+    },
+    {
+      "name": "日记-段落级",
+      "type": "diary",
+      "intensity": "light",
+      "style": "plain",
+      "mode": "section",
+      "content": "排队的时候一直在看手机。",
+      "expect": ["只润色【选中段】", "不要改写上下文"]
+    }
+  ],
+  "promptPolish": [
+    {
+      "name": "含糊输入-整理",
+      "text": "整理一下",
+      "modelOutput": "{\"prompt\":\"帮我整理知识库中重复的笔记，先列出合并方案再执行\",\"added\":[\"明确对象\",\"要求先给方案\"],\"intent\":\"organize\"}",
+      "expectIntent": "organize",
+      "expectDegraded": false,
+      "promptContains": "合并方案"
+    },
+    {
+      "name": "代码块包裹",
+      "text": "查一下 cordis",
+      "modelOutput": "```json\n{\"prompt\":\"在知识库中检索 Cordis 相关文档\",\"added\":[],\"intent\":\"search\"}\n```",
+      "expectIntent": "search",
+      "expectDegraded": false,
+      "promptContains": "Cordis"
+    },
+    {
+      "name": "模型输出不可解析-降级",
+      "text": "整理一下",
+      "modelOutput": "抱歉，我无法处理这个请求",
+      "expectIntent": "other",
+      "expectDegraded": true,
+      "promptContains": "整理一下"
+    }
+  ],
+  "skills": {
+    "expectSkills": ["knowledge_curator", "doc_writer", "research_web", "daily_assistant"],
+    "indexContains": ["use_skill", "文档整理", "联网调研"]
+  }
+}

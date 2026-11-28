@@ -13,6 +13,7 @@
     "start": "pnpm --filter @ikit/server start",
     "test": "tsx --test \"packages/**/*.test.ts\" \"apps/**/*.test.ts\"",
     "check:versions": "node scripts/check-versions.mjs",
+    "eval:prompts": "tsx scripts/eval-prompts.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { Schema } from 'cordis'
+import { findSkill, skillIndexText, skillList, SKILLS } from './skills.js'
 import { createLogger, safeFetchText } from '@ikit/shared'
 import type { Context } from 'cordis'
 import type { ChatMessage, LlmChatOptions, LlmService, LlmToolDefinition } from '@ikit/plugin-llm'
@@ -196,6 +197,38 @@ export function apply(_ctx: Context, config: Config) {
       } catch (e) {
         return `抓取失败：${e instanceof Error ? e.message : String(e)}`
       }
+    },
+  })
+
+  // 内置工具：加载技能正文（渐进披露，2026-11-28 M2）
+  registerTool({
+    name: 'use_skill',
+    description:
+      '加载某个技能的完整操作流程（正文）。' +
+      '何时用：判断需要按固定流程处理时（文档整理、写作、联网调研、站务问答），先调用本工具加载对应技能，再按其中步骤执行。' +
+      '何时不用：普通问答不需要；一次对话最多加载 2 个技能，不要重复加载同一个。' +
+      '参数：name 必须是技能索引里的名字；返回正文后按步骤继续，不要偏离流程。',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          enum: SKILLS.map((s) => s.name),
+          description: '技能名（见 system prompt 的技能索引）',
+        },
+      },
+      required: ['name'],
+    },
+    handler: async (args, call) => {
+      const skill = findSkill(String(args.name ?? ''))
+      if (!skill) {
+        return `未找到技能「${String(args.name)}」。可用技能：${SKILLS.map((s) => s.name).join('、')}`
+      }
+      if (skill.requiresAdmin && call?.role !== 'admin') {
+        return '错误：该技能仅站主可用。'
+      }
+      log.info(`[agent] use_skill ${skill.name} by user ${call?.userId ?? '(unknown)'}`)
+      return `【技能：${skill.title}（${skill.name} ${skill.version}）】\n${skill.body}`
     },
   })
 
@@ -401,7 +434,7 @@ export function apply(_ctx: Context, config: Config) {
     llmOptions: LlmChatOptions = {},
   ): AsyncIterable<AgentStreamEvent> {
     const messages: ChatMessage[] = [
-      { role: 'system', content: config.systemPrompt ?? '' },
+      { role: 'system', content: [config.systemPrompt ?? '', skillIndexText()].filter(Boolean).join('\n\n') },
       ...history,
       { role: 'user', content: userMessage },
     ]
@@ -731,6 +764,7 @@ export function apply(_ctx: Context, config: Config) {
         parameters,
       }))
     },
+    listSkills: () => skillList(),
     runTool,
     resolveApproval,
     runStream,

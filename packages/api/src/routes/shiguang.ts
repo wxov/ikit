@@ -4,6 +4,7 @@ import type { Context } from 'cordis'
 import type { ApiRouteDeps } from './deps.js'
 import {
   buildPolishPrompt,
+  nextIntensity,
   normalizePolishIntensity,
   normalizePolishStyle,
   normalizePolishType,
@@ -160,7 +161,7 @@ export function registerShiguangRoutes(app: FastifyInstance, ctx: Context, deps:
     }),
   )
 
-  // ---- 拾光：AI 润色（仅日记 / 感悟）----
+  // ---- 拾光：AI 润色（仅日记 / 感悟；支持整篇 / 段落级、单版 / 双版，2026-11-28 M2）----
   app.post('/api/shiguang/polish', (req, reply) =>
     requireUser(req, reply, async () => {
       if (!requireUnlock(req, reply)) return
@@ -169,6 +170,8 @@ export function registerShiguangRoutes(app: FastifyInstance, ctx: Context, deps:
         content?: string
         intensity?: string
         style?: string
+        variants?: number
+        section?: { before?: string; after?: string } | null
       }
       const type = normalizePolishType(body.type)
       const content = typeof body.content === 'string' ? body.content.trim() : ''
@@ -186,13 +189,23 @@ export function registerShiguangRoutes(app: FastifyInstance, ctx: Context, deps:
       }
       const intensity = normalizePolishIntensity(body.intensity)
       const style = normalizePolishStyle(body.style)
+      const variants: 1 | 2 = body.variants === 2 ? 2 : 1
+      const section = body.section && (body.section.before || body.section.after) ? body.section : null
+      const mode = section ? 'section' : 'full'
       const kind = type === 'diary' ? '日记' : '感悟'
-      const prompt = buildPolishPrompt(type, intensity, style)
-      try {
+      const before = String(section?.before ?? '').slice(-400)
+      const after = String(section?.after ?? '').slice(0, 400)
+
+      const runOne = async (int: typeof intensity): Promise<string> => {
+        const prompt = buildPolishPrompt(type, int, style, mode)
+        const user =
+          mode === 'section'
+            ? `【类型】${kind}\n【上文（仅参考）】\n${before || '（无）'}\n【选中段（只润色这一段）】\n${content}\n【下文（仅参考）】\n${after || '（无）'}`
+            : `【类型】${kind}\n【原文】\n${content}`
         const res = await ctx.llm.chat(
           [
             { role: 'system', content: prompt.system },
-            { role: 'user', content: `【类型】${kind}\n【原文】\n${content}` },
+            { role: 'user', content: user },
           ],
           { temperature: prompt.temperature, maxTokens: prompt.maxTokens },
         )
@@ -200,11 +213,27 @@ export function registerShiguangRoutes(app: FastifyInstance, ctx: Context, deps:
         // 去掉模型偶尔带上的代码块/引号包裹
         text = text.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/, '').trim()
         text = text.replace(/^["“']([\s\S]*)["”']$/, '$1').trim()
-        if (!text) {
+        return text
+      }
+
+      try {
+        const targets = variants === 2 ? [intensity, nextIntensity(intensity)] : [intensity]
+        const settled = await Promise.allSettled(targets.map((i) => runOne(i)))
+        const texts = settled
+          .map((r) => (r.status === 'fulfilled' ? r.value : ''))
+          .filter((t) => !!t)
+        if (!texts.length) {
           reply.code(502)
           return { error: '润色结果为空，请重试' }
         }
-        return { text, intensity, style }
+        return {
+          text: texts[0],
+          alternatives: texts.slice(1),
+          variants: texts.length,
+          mode,
+          intensity,
+          style,
+        }
       } catch (e: any) {
         reply.code(502)
         return { error: e?.message ?? 'AI 润色失败', code: 'E_POLISH_FAILED' }

@@ -51,10 +51,24 @@ const polishError = ref('')
 /** 润色强度 / 风格（2026-11-28）：日记更适合轻/标准，感悟可深 */
 const polishIntensity = ref<'light' | 'standard' | 'deep'>('standard')
 const polishStyle = ref<'plain' | 'literary'>('plain')
+/** 单版 / 双版对比（2026-11-28 M2）：双版 = 并行两次调用，第二版强度更深一档 */
+const polishVariants = ref<1 | 2>(1)
+const polishAlternatives = ref<string[]>([])
+/** 段落级润色：记录选区与调用时的原文，采纳时只替换选中段 */
+const editorTextarea = ref<HTMLTextAreaElement | null>(null)
+const polishSection = ref<{ start: number; end: number; base: string } | null>(null)
+/** 当前 textarea 是否有选区（用于提示「将只润色选中段」） */
+const hasSelection = ref(false)
+function syncSelection() {
+  const el = editorTextarea.value
+  hasSelection.value = !!el && el.selectionEnd > el.selectionStart
+}
 
 function resetPolish() {
   polishResult.value = ''
   polishError.value = ''
+  polishAlternatives.value = []
+  polishSection.value = null
 }
 
 async function doPolish() {
@@ -63,18 +77,35 @@ async function doPolish() {
   polishing.value = true
   polishResult.value = ''
   polishError.value = ''
+  polishAlternatives.value = []
+  polishSection.value = null
   try {
-    const r = await api<{ text: string }>('/api/shiguang/polish', {
+    // 有选区 → 只润色选中段（上文/下文各取 200 字作参考）
+    const el = editorTextarea.value
+    const start = el?.selectionStart ?? 0
+    const end = el?.selectionEnd ?? 0
+    const hasSelection = !!el && end > start && v.content.slice(start, end).trim().length > 0
+    const payload: Record<string, unknown> = {
+      type: v.type,
+      content: hasSelection ? v.content.slice(start, end) : v.content,
+      intensity: polishIntensity.value,
+      style: polishStyle.value,
+      variants: polishVariants.value,
+    }
+    if (hasSelection) {
+      payload.section = {
+        before: v.content.slice(Math.max(0, start - 200), start),
+        after: v.content.slice(end, end + 200),
+      }
+      polishSection.value = { start, end, base: v.content }
+    }
+    const r = await api<{ text: string; alternatives?: string[] }>('/api/shiguang/polish', {
       method: 'POST',
       headers: hdrs(),
-      body: JSON.stringify({
-        type: v.type,
-        content: v.content,
-        intensity: polishIntensity.value,
-        style: polishStyle.value,
-      }),
+      body: JSON.stringify(payload),
     })
     polishResult.value = r.text
+    polishAlternatives.value = r.alternatives ?? []
   } catch (e: any) {
     polishError.value = errMsg(e)
   } finally {
@@ -82,11 +113,20 @@ async function doPolish() {
   }
 }
 
-function applyPolish() {
-  if (!editing.value || !polishResult.value) return
-  editing.value.content = polishResult.value
+/** 采纳某一版：段落级时只替换选中段；原文已变则退回整篇替换 */
+function applyPolish(choice?: string) {
+  const v = editing.value
+  const text = (choice ?? polishResult.value).trim()
+  if (!v || !text) return
+  const sec = polishSection.value
+  if (sec && v.content === sec.base) {
+    v.content = `${v.content.slice(0, sec.start)}${text}${v.content.slice(sec.end)}`
+    notice.value = '已采纳润色结果（仅替换选中段）'
+  } else {
+    v.content = text
+    notice.value = '已采纳润色结果'
+  }
   resetPolish()
-  notice.value = '已采纳润色结果'
 }
 
 const locked = computed(() => !token.value)
@@ -441,7 +481,16 @@ onMounted(loadStatus)
           <input v-model="editing.title" class="sg-input sm grow" placeholder="标题（可选）" />
           <input v-if="editing.type === 'quote'" v-model="editing.author" class="sg-input sm" placeholder="出处/作者" />
         </div>
-        <textarea v-model="editing.content" class="sg-textarea" rows="6" placeholder="写点什么…" />
+        <textarea
+          ref="editorTextarea"
+          v-model="editing.content"
+          class="sg-textarea"
+          rows="6"
+          placeholder="写点什么…"
+          @mouseup="syncSelection"
+          @keyup="syncSelection"
+          @select="syncSelection"
+        />
         <!-- AI 润色：仅日记 / 感悟 -->
         <div class="sg-editor-tools">
           <button
@@ -472,16 +521,41 @@ onMounted(loadStatus)
             <option value="plain">风格·朴素</option>
             <option value="literary">风格·文艺</option>
           </select>
-          <span v-else class="sg-hint">名言不支持 AI 润色</span>
+          <select
+            v-if="editing.type !== 'quote'"
+            v-model.number="polishVariants"
+            class="sg-select"
+            title="单版更快；双版并行生成两版，可左右对比后采纳"
+          >
+            <option :value="1">单版</option>
+            <option :value="2">双版对比</option>
+          </select>
+          <span v-if="editing.type !== 'quote' && hasSelection" class="sg-hint">将只润色选中段</span>
+          <span v-else-if="editing.type === 'quote'" class="sg-hint">名言不支持 AI 润色</span>
         </div>
         <div v-if="polishResult || polishError" class="sg-polish">
-          <div class="sg-polish-head">AI 润色结果（不改原意，仅优化表达）</div>
+          <div class="sg-polish-head">
+            AI 润色结果（不改原意，仅优化表达）
+            <span v-if="polishSection" class="sg-polish-scope">· 仅选中段</span>
+          </div>
           <div v-if="polishError" class="sg-polish-error">{{ polishError }}</div>
+          <div v-else-if="polishAlternatives.length" class="sg-dual">
+            <div class="sg-dual-col">
+              <div class="sg-dual-tag">版本 A</div>
+              <div class="sg-polish-text">{{ polishResult }}</div>
+              <button class="sg-btn sm primary" @click="applyPolish(polishResult)">采纳 A</button>
+            </div>
+            <div v-for="(alt, i) in polishAlternatives" :key="i" class="sg-dual-col">
+              <div class="sg-dual-tag">版本 {{ i === 0 ? 'B' : 'C' }}</div>
+              <div class="sg-polish-text">{{ alt }}</div>
+              <button class="sg-btn sm primary" @click="applyPolish(alt)">采纳 {{ i === 0 ? 'B' : 'C' }}</button>
+            </div>
+          </div>
           <template v-else>
             <div class="sg-polish-text">{{ polishResult }}</div>
             <div class="sg-row">
               <button class="sg-btn sm ghost" @click="resetPolish">放弃</button>
-              <button class="sg-btn sm primary" @click="applyPolish">采纳替换</button>
+              <button class="sg-btn sm primary" @click="applyPolish()">采纳替换</button>
             </div>
           </template>
         </div>
@@ -622,4 +696,8 @@ onMounted(loadStatus)
 .sg-polish-head { font-size: 12px; font-weight: 600; color: var(--primary-dark); }
 .sg-polish-text { font-size: 14px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; color: var(--text); }
 .sg-polish-error { font-size: 12px; color: var(--danger, #dc2626); }
+.sg-dual { display: flex; gap: 10px; margin-top: 6px; }
+.sg-dual-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; }
+.sg-dual-tag { font-size: 11px; font-weight: 600; color: var(--text-muted, #6b7280); }
+.sg-polish-scope { font-weight: 400; color: var(--text-muted, #6b7280); }
 </style>
